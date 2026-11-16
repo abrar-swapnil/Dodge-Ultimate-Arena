@@ -67,6 +67,8 @@
     constructor() {
       this.ctx = null;
       this.muted = false;
+      this.customFailSound = new Audio("gameover.mp3");
+      this.customFailSound.preload = "auto";
     }
 
     _init() {
@@ -233,7 +235,17 @@
     }
 
     playGameOver() {
-      this.playTone(200, "sawtooth", 0.4, 0.35);
+      if (this.muted) return;
+      // Try playing custom audio if present
+      if (this.customFailSound) {
+        this.customFailSound.currentTime = 0;
+        this.customFailSound.play().catch(() => {
+          // Fallback to synthesized audio tone if custom file fails or not found
+          this.playTone(200, "sawtooth", 0.4, 0.35);
+        });
+      } else {
+        this.playTone(200, "sawtooth", 0.4, 0.35);
+      }
     }
   }
 
