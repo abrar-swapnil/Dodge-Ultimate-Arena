@@ -2436,7 +2436,7 @@
 
       if (player.hasShield) {
         player.hasShield = false;
-        player.invulnerableTimer = 1.0;
+        player.invulnerableTimer = 1.5;
         this.floatingTexts.push(new FloatingText(player.x, player.y, "SHIELD BROKE!", "#00e5ff"));
         return;
       }
@@ -2444,14 +2444,36 @@
       player.lives = Math.max(0, player.lives - 1);
       this.updateHUD();
 
+      // Repel all nearby enemies away from player so they can never sticky-hit!
+      const pcx = player.x + player.size / 2;
+      const pcy = player.y + player.size / 2;
+      for (let i = 0; i < this.enemies.length; i++) {
+        const e = this.enemies[i];
+        const ecx = e.x + e.size / 2;
+        const ecy = e.y + e.size / 2;
+        const dx = ecx - pcx;
+        const dy = ecy - pcy;
+        const dist = Math.hypot(dx, dy);
+        if (dist < 220) {
+          const force = (1 - dist / 220) * 550 + 200;
+          const nx = dist > 0 ? dx / dist : (Math.random() - 0.5);
+          const ny = dist > 0 ? dy / dist : (Math.random() - 0.5);
+          e.knockbackVx = nx * force;
+          e.knockbackVy = ny * force;
+        }
+      }
+
       if (player.lives > 0) {
-        // Player still has lives left! Give iframe and warning
-        player.invulnerableTimer = 1.6; // 1.6s invulnerability blink
+        // Player still has lives left! Give 2.5s safe iframe and speed buff to escape
+        player.invulnerableTimer = 2.5; // 2.5s invulnerability blink
+        player.speedBuffTimer = 1.8;   // 1.8s speed boost to safely run away
         this.sounds.playWarning();
-        const msg = player.lives === 2 ? "❤️ 2 LIVES REMAINING!" : "⚠️ 1 LIFE LEFT! CAUTION!";
-        this.floatingTexts.push(new FloatingText(player.x, player.y, msg, "#ff2244"));
-        for (let p = 0; p < 15; p++) {
-          this.particles.push(new Particle(player.x + player.size / 2, player.y + player.size / 2, "#ff2244"));
+
+        const msg = player.lives === 2 ? "❤️ 2 LIVES LEFT! ESCAPE!" : "⚠️ LAST LIFE! RUN!";
+        this.floatingTexts.push(new FloatingText(player.x, player.y - 15, msg, "#ff2244"));
+
+        for (let p = 0; p < 25; p++) {
+          this.particles.push(new Particle(pcx, pcy, p % 2 === 0 ? "#ffcc00" : "#ff2244"));
         }
       } else {
         // 3 Lives Lost -> ELIMINATED!
