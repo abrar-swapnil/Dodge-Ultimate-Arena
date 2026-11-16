@@ -234,6 +234,13 @@
       });
     }
 
+    stopGameOver() {
+      if (this.customFailSound) {
+        this.customFailSound.pause();
+        this.customFailSound.currentTime = 0;
+      }
+    }
+
     playGameOver() {
       if (this.muted) return;
       // Try playing custom audio if present
@@ -1510,6 +1517,7 @@
 
     // --- Match & Progression ---
     startMatch(mode) {
+      this.sounds.stopGameOver();
       this.mode = mode;
       this.state = "PLAYING";
       this.level = 1;
