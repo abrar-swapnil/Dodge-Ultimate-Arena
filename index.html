@@ -225,6 +225,18 @@
           </button>
         </div>
 
+        <!-- Active Paused Match Resume Card (Appears whenever a match is in progress) -->
+        <button type="button" id="btn-resume-active-match" class="mode-card resume-active-match-card hidden">
+          <div class="mode-icon">▶️</div>
+          <div class="mode-info">
+            <div style="display: flex; align-items: center; justify-content: space-between; gap: 6px;">
+              <h3 style="color: #ffcc00; font-size: 0.95rem;">▶ RESUME ACTIVE MATCH</h3>
+              <span class="badge" style="background: #eab308; color: #000; font-weight: 900; font-size: 0.65rem;">PAUSED</span>
+            </div>
+            <p id="resume-match-status-text" style="color: #fef08a;">Score: 0 • Level 1 (Map 1)</p>
+          </div>
+        </button>
+
         <!-- 1 & 2. Solo & Multiplayer Modes -->
         <div class="mode-cards">
           <button id="btn-mode-solo" class="mode-card highlight">
@@ -458,8 +470,8 @@
         <p class="tagline">Take a breath. Ready to dodge again?</p>
         <div class="pause-actions">
           <button id="btn-resume-game" class="btn primary-btn large-btn">▶ RESUME GAME</button>
-          <button id="btn-restart-game" class="btn secondary-btn">🔄 RESTART MATCH</button>
-          <button id="btn-pause-menu" class="btn small-btn">🏠 MAIN MENU</button>
+          <button id="btn-pause-menu" class="btn secondary-btn">🏠 MAIN MENU (Keep Match)</button>
+          <button id="btn-restart-game" class="btn small-btn danger-btn">🔄 RESTART NEW MATCH</button>
         </div>
       </div>
     </div>

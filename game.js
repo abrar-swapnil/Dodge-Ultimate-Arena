@@ -1109,6 +1109,7 @@
       this.mode = "SOLO"; // 'SOLO', 'CUSTOM_ROOM'
       this.difficulty = DIFFICULTIES.NORMAL;
       this.state = "MENU"; // 'MENU', 'PLAYING', 'MATCH_OVER'
+      this.hasPausedMatch = false; // Tracks ongoing match so player can return to it from menu
 
       // Progression
       this.level = 1;
@@ -1177,7 +1178,12 @@
 
       // Menu and Top Bar
       document.getElementById("pause-btn")?.addEventListener("click", () => this.togglePause());
-      document.getElementById("menu-btn")?.addEventListener("click", () => this.showMenu());
+      document.getElementById("menu-btn")?.addEventListener("click", () => {
+        if (this.state === "PLAYING" || this.state === "PAUSED") {
+          this.hasPausedMatch = true;
+        }
+        this.showMenu();
+      });
       document.getElementById("sound-btn")?.addEventListener("click", () => {
         this.sounds._init();
         const muted = this.sounds.toggleMute();
@@ -1189,13 +1195,23 @@
         else document.exitFullscreen().catch(() => {});
       });
 
+      // Active Paused Match Resume Button (In Main Menu)
+      document.getElementById("btn-resume-active-match")?.addEventListener("click", () => {
+        if (this.hasPausedMatch && this.p1 && this.p1.isAlive) {
+          this.hideMenu();
+          this.resumeWithCountdown();
+        }
+      });
+
       // Pause Modal Buttons
       document.getElementById("btn-resume-game")?.addEventListener("click", () => this.resumeWithCountdown());
       document.getElementById("btn-restart-game")?.addEventListener("click", () => {
+        this.hasPausedMatch = false;
         this.hidePause();
         this.startMatch(this.mode);
       });
       document.getElementById("btn-pause-menu")?.addEventListener("click", () => {
+        this.hasPausedMatch = true;
         this.hidePause();
         this.showMenu();
       });
@@ -1469,6 +1485,22 @@
       this.state = "MENU";
       document.getElementById("modal-overlay")?.classList.remove("hidden");
       document.getElementById("match-banner")?.classList.add("hidden");
+
+      // Dynamic Active Paused Match Card
+      const resumeBtn = document.getElementById("btn-resume-active-match");
+      const resumeText = document.getElementById("resume-match-status-text");
+      if (resumeBtn) {
+        if (this.hasPausedMatch && this.p1 && this.p1.isAlive) {
+          resumeBtn.classList.remove("hidden");
+          const modeLabel = (this.mode === "CUSTOM_ROOM") ? "Multiplayer Room" : "Solo Campaign";
+          const livesLeft = this.p1.lives !== undefined ? this.p1.lives : 3;
+          if (resumeText) {
+            resumeText.innerText = `${modeLabel} • Score: ${this.p1Score} • Lvl ${this.level} (Map ${this.mapIndex}) • Lives: ${livesLeft}/3`;
+          }
+        } else {
+          resumeBtn.classList.add("hidden");
+        }
+      }
     }
 
     hideMenu() {
@@ -1486,6 +1518,7 @@
     pauseGame() {
       if (this.state !== "PLAYING") return;
       this.state = "PAUSED";
+      this.hasPausedMatch = true;
       document.getElementById("pause-overlay")?.classList.remove("hidden");
     }
 
@@ -2145,10 +2178,26 @@
 
       const endpoint = mode === "register" ? `${serverUrl}/api/auth/register` : `${serverUrl}/api/auth/login`;
 
+      // Read client backup from local vault for Auto-Healing
+      let clientBackup = null;
+      try {
+        const vault = JSON.parse(localStorage.getItem("dodgearena_account_vault") || "{}");
+        const lowerName = username.toLowerCase();
+        if (vault[lowerName]) {
+          clientBackup = vault[lowerName];
+        } else {
+          const currentProfile = JSON.parse(localStorage.getItem("dodgearena_gamer_profile") || "null");
+          const savedCreds = JSON.parse(localStorage.getItem("dodgearena_gamer_credentials") || "null");
+          if (currentProfile && currentProfile.username && currentProfile.username.toLowerCase() === lowerName) {
+            clientBackup = { ...currentProfile, pin: (savedCreds && savedCreds.pin) ? savedCreds.pin : pin };
+          }
+        }
+      } catch (e) {}
+
       return fetch(endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ username, pin }),
+        body: JSON.stringify({ username, pin, clientBackup }),
         signal: controller.signal,
       })
         .then((r) => { clearTimeout(timeoutId); return r.json(); })
@@ -2229,6 +2278,19 @@
     onLoginSuccess(profile) {
       this.gamerProfile = profile;
       localStorage.setItem("dodgearena_gamer_profile", JSON.stringify(profile));
+
+      // Store in permanent local account vault for zero-loss recovery across redeployments
+      try {
+        const vault = JSON.parse(localStorage.getItem("dodgearena_account_vault") || "{}");
+        const creds = this._getStoredCreds() || {};
+        const pinVal = creds.pin || document.getElementById("acc-pin-input")?.value?.trim() || "";
+        const lowerName = profile.username.toLowerCase();
+        vault[lowerName] = {
+          ...profile,
+          pin: pinVal || vault[lowerName]?.pin || "",
+        };
+        localStorage.setItem("dodgearena_account_vault", JSON.stringify(vault));
+      } catch (e) {}
 
       // Apply saved avatar
       if (profile.photo) {
@@ -2399,6 +2461,14 @@
           if (data.success && data.profile) {
             this.gamerProfile = data.profile;
             localStorage.setItem("dodgearena_gamer_profile", JSON.stringify(data.profile));
+            try {
+              const vault = JSON.parse(localStorage.getItem("dodgearena_account_vault") || "{}");
+              vault[data.profile.username.toLowerCase()] = {
+                ...data.profile,
+                pin: creds.pin,
+              };
+              localStorage.setItem("dodgearena_account_vault", JSON.stringify(vault));
+            } catch (e) {}
           }
         })
         .catch(() => {
@@ -3012,6 +3082,8 @@
 
     // --- Match & Progression ---
     startMatch(mode) {
+      this.hasPausedMatch = false;
+      document.getElementById("btn-resume-active-match")?.classList.add("hidden");
       this.sounds.stopGameOver();
       this.mode = mode;
       this.state = "PLAYING";
@@ -3502,6 +3574,8 @@
         player.isAlive = false;
         this.sounds.playGameOver();
         this.state = "MATCH_OVER";
+        this.hasPausedMatch = false;
+        document.getElementById("btn-resume-active-match")?.classList.add("hidden");
         this.floatingTexts.push(new FloatingText(player.x, player.y, "💀 ELIMINATED!", "#ff0000"));
         if (this.mode === "CUSTOM_ROOM" && this.isHost) {
           this.broadcastState();

@@ -101,7 +101,7 @@ app.get("/health", (req, res) => {
 
 // 1. REGISTER: Create a brand new unique Gamer Tag & unique Secret PIN
 app.post("/api/auth/register", (req, res) => {
-  const { username, pin } = req.body;
+  const { username, pin, clientBackup } = req.body;
   if (!username || !pin) {
     return res.status(400).json({ success: false, error: "Gamer Tag and PIN are required." });
   }
@@ -117,8 +117,14 @@ app.post("/api/auth/register", (req, res) => {
     return res.status(400).json({ success: false, error: "Secret PIN must be 3 to 12 digits/letters." });
   }
 
-  // Check 1: Username must be unique
+  // If user already exists:
   if (gamerProfiles[key]) {
+    // If the PIN matches, this is the owner logging in through register form!
+    if (gamerProfiles[key].pin === cleanPin) {
+      gamerProfiles[key].lastLoginAt = new Date().toISOString();
+      saveProfilesToDisk();
+      return res.json({ success: true, isNew: false, profile: sanitizeProfile(gamerProfiles[key]) });
+    }
     const suggestions = generateSuggestions(cleanName);
     return res.status(409).json({
       success: false,
@@ -127,8 +133,37 @@ app.post("/api/auth/register", (req, res) => {
     });
   }
 
+  // Auto-Healing on register: If account was created locally or in client vault
+  if (clientBackup && clientBackup.username && clientBackup.pin) {
+    const backupPin = clientBackup.pin.toString().trim();
+    if (backupPin === cleanPin && clientBackup.username.toLowerCase() === key) {
+      console.log(`[AUTH] Auto-Healing on Register: Restoring profile for '${cleanName}'.`);
+      const restoredUser = {
+        username: cleanName,
+        pin: cleanPin,
+        shape: clientBackup.shape || "square",
+        photo: clientBackup.photo || null,
+        hudLayout: clientBackup.hudLayout || null,
+        stats: {
+          highScore: clientBackup.stats?.highScore || 0,
+          mpWins: clientBackup.stats?.mpWins || 0,
+          mpLosses: clientBackup.stats?.mpLosses || 0,
+          bossesDefeated: clientBackup.stats?.bossesDefeated || 0,
+          totalMatches: clientBackup.stats?.totalMatches || 0,
+          soloMaxLevel: clientBackup.stats?.soloMaxLevel || 1,
+          mpMaxLevel: clientBackup.stats?.mpMaxLevel || 1,
+        },
+        createdAt: clientBackup.createdAt || new Date().toISOString(),
+        lastLoginAt: new Date().toISOString(),
+      };
+      gamerProfiles[key] = restoredUser;
+      saveProfilesToDisk();
+      return res.json({ success: true, isNew: false, restored: true, profile: sanitizeProfile(restoredUser) });
+    }
+  }
+
   // Check 2: Secret PIN must be unique across all players
-  if (isPinInUse(cleanPin)) {
+  if (isPinInUse(cleanPin, key)) {
     return res.status(409).json({
       success: false,
       error: "This secret PIN is already in use by another gamer! For your account security, please pick a unique PIN.",
@@ -163,7 +198,7 @@ app.post("/api/auth/register", (req, res) => {
 
 // 2. LOGIN: Authenticate existing Gamer Tag with Secret PIN
 app.post("/api/auth/login", (req, res) => {
-  const { username, pin } = req.body;
+  const { username, pin, clientBackup } = req.body;
   if (!username || !pin) {
     return res.status(400).json({ success: false, error: "Gamer Tag and PIN are required." });
   }
@@ -172,7 +207,38 @@ app.post("/api/auth/login", (req, res) => {
   const key = cleanName.toLowerCase();
   const cleanPin = pin.toString().trim();
 
-  const user = gamerProfiles[key];
+  let user = gamerProfiles[key];
+
+  // Auto-Healing: If user is missing from server (e.g. after fresh container deploy),
+  // but client provided a verified local backup with matching PIN, auto-restore the account!
+  if (!user && clientBackup && clientBackup.username && clientBackup.pin) {
+    const backupPin = clientBackup.pin.toString().trim();
+    if (backupPin === cleanPin && clientBackup.username.toLowerCase() === key) {
+      console.log(`[AUTH] Auto-Healing: Restoring profile for '${cleanName}' from client backup after server redeploy.`);
+      user = {
+        username: cleanName,
+        pin: cleanPin,
+        shape: clientBackup.shape || "square",
+        photo: clientBackup.photo || null,
+        hudLayout: clientBackup.hudLayout || null,
+        stats: {
+          highScore: clientBackup.stats?.highScore || 0,
+          mpWins: clientBackup.stats?.mpWins || 0,
+          mpLosses: clientBackup.stats?.mpLosses || 0,
+          bossesDefeated: clientBackup.stats?.bossesDefeated || 0,
+          totalMatches: clientBackup.stats?.totalMatches || 0,
+          soloMaxLevel: clientBackup.stats?.soloMaxLevel || 1,
+          mpMaxLevel: clientBackup.stats?.mpMaxLevel || 1,
+        },
+        createdAt: clientBackup.createdAt || new Date().toISOString(),
+        lastLoginAt: new Date().toISOString(),
+      };
+      gamerProfiles[key] = user;
+      saveProfilesToDisk();
+      return res.json({ success: true, isNew: false, restored: true, profile: sanitizeProfile(user) });
+    }
+  }
+
   if (!user) {
     return res.status(404).json({
       success: false,
@@ -265,9 +331,42 @@ app.post("/api/profile/save", (req, res) => {
     return res.status(400).json({ success: false, error: "Gamer Tag and PIN are required." });
   }
 
-  const key = username.trim().toLowerCase();
-  const user = gamerProfiles[key];
-  if (!user || user.pin !== pin.toString().trim()) {
+  const cleanName = username.trim();
+  const key = cleanName.toLowerCase();
+  const cleanPin = pin.toString().trim();
+  let user = gamerProfiles[key];
+
+  // Auto-Healing: If user is missing from server (e.g. after fresh container deploy),
+  // recreate from sync payload
+  if (!user) {
+    console.log(`[AUTH] Auto-Healing on profile save: Restoring profile for '${cleanName}'.`);
+    user = {
+      username: cleanName,
+      pin: cleanPin,
+      shape: shape || "square",
+      photo: photo || null,
+      hudLayout: hudLayout || null,
+      stats: {
+        highScore: stats?.highScore || 0,
+        mpWins: stats?.mpWins || 0,
+        mpLosses: stats?.mpLosses || 0,
+        bossesDefeated: stats?.bossesDefeated || 0,
+        totalMatches: stats?.totalMatches || 0,
+        soloMaxLevel: stats?.soloMaxLevel || 1,
+        mpMaxLevel: stats?.mpMaxLevel || 1,
+      },
+      createdAt: new Date().toISOString(),
+      lastLoginAt: new Date().toISOString(),
+    };
+    gamerProfiles[key] = user;
+    if (hudLayout) {
+      userHudLayouts[cleanName] = { layout: hudLayout, updatedAt: new Date().toISOString() };
+    }
+    saveProfilesToDisk();
+    return res.json({ success: true, restored: true, profile: sanitizeProfile(user) });
+  }
+
+  if (user.pin !== cleanPin) {
     return res.status(401).json({ success: false, error: "Authentication failed. Invalid PIN." });
   }
 

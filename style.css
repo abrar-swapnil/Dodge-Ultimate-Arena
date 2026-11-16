@@ -506,18 +506,18 @@ html, body {
 
   /* ── Mobile Portrait Menu & Modal Balance ─────────────────── */
   .modal-backdrop {
-    padding: max(10px, env(safe-area-inset-top)) 10px max(14px, env(safe-area-inset-bottom)) !important;
-    align-items: flex-start !important; /* Never clips top header under status bar */
+    padding: max(22px, calc(env(safe-area-inset-top) + 16px)) 10px max(24px, calc(env(safe-area-inset-bottom) + 16px)) !important;
+    align-items: flex-start !important; /* Never clips top header under status bar / dynamic island */
     overflow-y: auto !important;
     -webkit-overflow-scrolling: touch;
   }
 
   .menu-modal {
-    margin: max(4px, calc(env(safe-area-inset-top) * 0.35)) auto max(16px, env(safe-area-inset-bottom)) !important;
-    padding: 12px 14px 16px !important;
+    margin: 4px auto max(20px, env(safe-area-inset-bottom)) !important;
+    padding: 14px 14px 18px !important;
     gap: 8px !important;
-    max-height: calc(100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 16px) !important;
-    max-height: calc(100vh - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 16px) !important;
+    max-height: calc(100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 30px) !important;
+    max-height: calc(100vh - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 30px) !important;
     border-radius: 14px !important;
   }
 
@@ -889,6 +889,20 @@ html, body {
   background: rgba(0, 229, 255, 0.25);
   border-color: #00e5ff;
   box-shadow: 0 6px 20px rgba(0, 229, 255, 0.35);
+}
+
+.resume-active-match-card {
+  background: linear-gradient(135deg, rgba(80, 60, 10, 0.85) 0%, rgba(30, 25, 10, 0.95) 100%) !important;
+  border: 2px solid #eab308 !important;
+  box-shadow: 0 0 20px rgba(234, 179, 8, 0.45) !important;
+  animation: resumePulse 1.8s infinite alternate ease-in-out;
+  cursor: pointer;
+  margin-bottom: 2px;
+}
+
+@keyframes resumePulse {
+  0% { box-shadow: 0 0 10px rgba(234, 179, 8, 0.3); border-color: #ca8a04; }
+  100% { box-shadow: 0 0 25px rgba(234, 179, 8, 0.7); border-color: #fde047; transform: translateY(-1px); }
 }
 
 .mode-icon {
