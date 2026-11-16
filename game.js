@@ -2052,9 +2052,29 @@
               this._doLogin(username, pin, serverUrl, silent, nextAttempt);
             }, 5000);
           } else {
-            if (!silent && msgEl) {
-              msgEl.style.color = "#ff4455";
-              msgEl.innerText = "❌ Server is offline. Please try again in a minute.";
+            // All retries failed → create LOCAL-ONLY offline profile so user is never blocked
+            if (!silent) {
+              const offlineProfile = {
+                username,
+                shape: localStorage.getItem("dodgearena_char_shape") || "square",
+                photo: localStorage.getItem("dodgearena_char_photo") || null,
+                hudLayout: null,
+                stats: { highScore: 0, mpWins: 0, mpLosses: 0, bossesDefeated: 0, totalMatches: 0 },
+                offline: true,
+              };
+              // Try to restore saved stats if available
+              try {
+                const saved = JSON.parse(localStorage.getItem("dodgearena_gamer_profile") || "null");
+                if (saved && saved.username === username && saved.stats) {
+                  offlineProfile.stats = saved.stats;
+                }
+              } catch (e) {}
+              localStorage.setItem("dodgearena_gamer_credentials", JSON.stringify({ username, pin }));
+              this.onLoginSuccess(offlineProfile);
+              if (msgEl) {
+                msgEl.style.color = "#ffaa00";
+                msgEl.innerText = "⚠️ Offline mode — stats saved locally. Cloud sync will auto-resume when server is back.";
+              }
             }
           }
         });
@@ -2115,9 +2135,24 @@
       const p = this.gamerProfile;
       if (!p) return;
       const s = p.stats || {};
-      document.getElementById("logged-username-display")?.setAttribute("", "");
       const lud = document.getElementById("logged-username-display");
       if (lud) lud.innerText = p.username;
+
+      // Show offline/online badge
+      const badge = document.getElementById("account-badge-pill");
+      if (badge) {
+        if (p.offline) {
+          badge.textContent = "⚠️ OFFLINE MODE";
+          badge.style.background = "rgba(255,170,0,0.2)";
+          badge.style.color = "#ffaa00";
+          badge.style.border = "1px solid #ffaa00";
+        } else {
+          badge.textContent = "CLOUD SYNCED ✅";
+          badge.style.background = "";
+          badge.style.color = "";
+          badge.style.border = "";
+        }
+      }
 
       document.getElementById("stat-mp-wins") && (document.getElementById("stat-mp-wins").innerText = s.mpWins || 0);
       document.getElementById("stat-high-score") && (document.getElementById("stat-high-score").innerText = s.highScore || 0);
@@ -2195,10 +2230,12 @@
         })
         .catch(() => {
           if (!quiet && syncEl) {
-            syncEl.style.color = "#ff4455";
-            syncEl.innerText = "❌ Could not reach server.";
+            syncEl.style.color = "#ffaa00";
+            syncEl.innerText = "⚠️ Offline — stats saved locally.";
             setTimeout(() => { if (syncEl) syncEl.innerText = ""; }, 3000);
           }
+          // Mark profile as offline so we know to retry later
+          if (this.gamerProfile) this.gamerProfile.offline = true;
         });
     }
 
