@@ -1376,6 +1376,12 @@
       const keysDown = {};
 
       window.addEventListener("keydown", (e) => {
+        // Ignore game hotkeys if typing in an input, textarea, or contentEditable
+        const activeTag = document.activeElement ? document.activeElement.tagName.toLowerCase() : "";
+        if (activeTag === "input" || activeTag === "textarea" || document.activeElement?.isContentEditable) {
+          return;
+        }
+
         this.sounds._init();
         keysDown[e.code] = true;
 
