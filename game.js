@@ -1134,6 +1134,17 @@
         document.getElementById("char-modal-overlay")?.classList.add("hidden");
       });
 
+      // Rules Modal Open / Close
+      document.getElementById("btn-open-rules-modal")?.addEventListener("click", () => {
+        document.getElementById("rules-modal-overlay")?.classList.remove("hidden");
+      });
+      document.getElementById("btn-close-rules-modal")?.addEventListener("click", () => {
+        document.getElementById("rules-modal-overlay")?.classList.add("hidden");
+      });
+      document.getElementById("btn-done-rules")?.addEventListener("click", () => {
+        document.getElementById("rules-modal-overlay")?.classList.add("hidden");
+      });
+
       // Rules Translate in Bangla / English toggle
       const translateBtn = document.getElementById("btn-translate-rules");
       const rulesEn = document.getElementById("rules-en");

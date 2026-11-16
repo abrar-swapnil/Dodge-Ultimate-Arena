@@ -218,33 +218,46 @@
           </div>
         </div>
 
-        <!-- 6. How To Play & Rules with Translation in Bangla -->
-        <div class="how-to-play-box">
-          <div class="how-to-header">
-            <span class="how-title">📖 HOW TO PLAY & RULES</span>
-            <button id="btn-translate-rules" class="translate-btn">🌐 Translate in বাংলা</button>
-          </div>
+        <!-- 6. How To Play & Rules Trigger Button -->
+        <button id="btn-open-rules-modal" class="btn secondary-btn rules-trigger-btn">
+          📖 <span>HOW TO PLAY & GAME RULES</span>
+        </button>
+      </div>
+    </div>
 
-          <!-- English Version (Default) -->
-          <div id="rules-en" class="rules-text">
-            <p><strong>• Movement:</strong> Move player using Joystick (Mobile) or WASD / Arrow keys (Laptop).</p>
-            <p><strong>• Lives & Health:</strong> You have <strong>3 Lives (❤️❤️❤️)</strong>. Taking a hit triggers a 3s safe i-frame blink and repels enemies!</p>
-            <p><strong>• Abilities:</strong> Hold <strong>Shift / 🏃 Sprint</strong> for 1.8x speed boost (20s CD). Use <strong>Space / ⚡ Dash</strong>, <strong>F / 💥 Push</strong>, and <strong>B / 🛡️ Dodge (3x)</strong>.</p>
-            <p><strong>• Progression:</strong> 20 pts (Map 2 Magma) ➔ 50 pts (Map 3 Abyss) ➔ 100 pts (Titan Boss Fight) ➔ Level 2 Cyber Core ➔ Final Boss at 250 pts!</p>
-            <p><strong>• Slay Bosses:</strong> Push Boss with <strong>💥 Shockwave (-20 HP)</strong> and collect <strong>⚡ Golden Orbs (-25 HP)</strong> to destroy the Boss!</p>
-            <p><strong>• Multiplayer:</strong> First to 25 pts becomes a Giant with Beam Cannon (E). First to 30 pts wins!</p>
-          </div>
-
-          <!-- Bangla Version (Toggled on click) -->
-          <div id="rules-bn" class="rules-text hidden">
-            <p><strong>• মুভমেন্ট:</strong> মোবাইলে ভার্চুয়াল জয়স্টিক এবং ল্যাপটপে WASD বা Arrow keys চেপে মুভ করো।</p>
-            <p><strong>• লাইফ সিস্টেম:</strong> তোমার <strong>৩টি জীবন (❤️❤️❤️)</strong> থাকবে। আঘাত খেলে ৩ সেকেন্ডের সেফ আই-ফ্রেম ব্লিঙ্ক পাবে এবং শত্রুরা ছিটকে দূরে সরে যাবে!</p>
-            <p><strong>• স্পেশাল ক্ষমতা:</strong> <strong>Shift / 🏃 Sprint</strong> ধরে রাখলে ১.৮ গুণ গতি বাড়বে (২০ সেকেন্ড কুলডাউন)। এছাড়াও রয়েছে <strong>Space / ⚡ Dash</strong>, <strong>F / 💥 Push</strong> এবং ৩ বার <strong>B / 🛡️ Emergency Dodge</strong>।</p>
-            <p><strong>• ম্যাপ ও লেভেল:</strong> ২০ পয়েন্টে (ম্যাপ ২ ম্যাগমা) ➔ ৫০ পয়েন্টে (ম্যাপ ৩ ভয়েড) ➔ ১০০ পয়েন্টে (লেভেল ১ টাইটান বস ফাইট) ➔ বস মারলে লেভেল ২ আনলক ➔ ২৫০ পয়েন্টে ফাইনাল বস!</p>
-            <p><strong>• বসকে বধ করার উপায়:</strong> বসের কাছে গিয়ে <strong>💥 Push মারলে (-২০ HP)</strong> এবং সোনালী <strong>⚡ Golden Orb সংগ্রহ করলে (-২৫ HP)</strong> মিসাইল গিয়ে বস ধ্বংস হবে!</p>
-            <p><strong>• মাল্টিপ্লেয়ার:</strong> যে আগে ২৫ পয়েন্ট পাবে সে জায়ান্ট হয়ে বিম কামান (E) ছুড়তে পারবে। ৩০ পয়েন্টে টিকে থাকলে ম্যাচ জয়!</p>
-          </div>
+    <!-- How To Play & Rules Modal Overlay Window -->
+    <div id="rules-modal-overlay" class="modal-backdrop hidden">
+      <div class="menu-modal rules-modal-window">
+        <div class="panel-header">
+          <span class="how-title" style="font-size: 1.05rem;">📖 HOW TO PLAY & RULES</span>
+          <button id="btn-close-rules-modal" class="text-btn">✖ Close</button>
         </div>
+
+        <div style="display: flex; justify-content: flex-end; margin-bottom: 6px;">
+          <button id="btn-translate-rules" class="translate-btn">🌐 Translate in বাংলা</button>
+        </div>
+
+        <!-- English Version (Default) -->
+        <div id="rules-en" class="rules-text">
+          <p><strong>• Movement:</strong> Move player using Joystick (Mobile) or WASD / Arrow keys (Laptop).</p>
+          <p><strong>• Lives & Health:</strong> You have <strong>3 Lives (❤️❤️❤️)</strong>. Taking a hit triggers a 3s safe i-frame blink and repels enemies!</p>
+          <p><strong>• Abilities:</strong> Hold <strong>Shift / 🏃 Sprint</strong> for 1.8x speed boost (20s CD). Use <strong>Space / ⚡ Dash</strong>, <strong>F / 💥 Push</strong>, and <strong>B / 🛡️ Dodge (3x)</strong>.</p>
+          <p><strong>• Progression:</strong> 20 pts (Map 2 Magma) ➔ 50 pts (Map 3 Abyss) ➔ 100 pts (Titan Boss Fight) ➔ Level 2 Cyber Core ➔ Final Boss at 250 pts!</p>
+          <p><strong>• Slay Bosses:</strong> Push Boss with <strong>💥 Shockwave (-20 HP)</strong> and collect <strong>⚡ Golden Orbs (-25 HP)</strong> to destroy the Boss!</p>
+          <p><strong>• Multiplayer:</strong> First to 25 pts becomes a Giant with Beam Cannon (E). First to 30 pts wins!</p>
+        </div>
+
+        <!-- Bangla Version (Toggled on click) -->
+        <div id="rules-bn" class="rules-text hidden">
+          <p><strong>• মুভমেন্ট:</strong> মোবাইলে ভার্চুয়াল জয়স্টিক এবং ল্যাপটপে WASD বা Arrow keys চেপে মুভ করো।</p>
+          <p><strong>• লাইফ সিস্টেম:</strong> তোমার <strong>৩টি জীবন (❤️❤️❤️)</strong> থাকবে। আঘাত খেলে ৩ সেকেন্ডের সেফ আই-ফ্রেম ব্লিঙ্ক পাবে এবং শত্রুরা ছিটকে দূরে সরে যাবে!</p>
+          <p><strong>• স্পেশাল ক্ষমতা:</strong> <strong>Shift / 🏃 Sprint</strong> ধরে রাখলে ১.৮ গুণ গতি বাড়বে (২০ সেকেন্ড কুলডাউন)। এছাড়াও রয়েছে <strong>Space / ⚡ Dash</strong>, <strong>F / 💥 Push</strong> এবং ৩ বার <strong>B / 🛡️ Emergency Dodge</strong>।</p>
+          <p><strong>• ম্যাপ ও লেভেল:</strong> ২০ পয়েন্টে (ম্যাপ ২ ম্যাগমা) ➔ ৫০ পয়েন্টে (ম্যাপ ৩ ভয়েড) ➔ ১০০ পয়েন্টে (লেভেল ১ টাইটান বস ফাইট) ➔ বস মারলে লেভেল ২ আনলক ➔ ২৫০ পয়েন্টে ফাইনাল বস!</p>
+          <p><strong>• বসকে বধ করার উপায়:</strong> বসের কাছে গিয়ে <strong>💥 Push মারলে (-২০ HP)</strong> এবং সোনালী <strong>⚡ Golden Orb সংগ্রহ করলে (-২৫ HP)</strong> মিসাইল গিয়ে বস ধ্বংস হবে!</p>
+          <p><strong>• মাল্টিপ্লেয়ার:</strong> যে আগে ২৫ পয়েন্ট পাবে সে জায়ান্ট হয়ে বিম কামান (E) ছুড়তে পারবে। ৩০ পয়েন্টে টিকে থাকলে ম্যাচ জয়!</p>
+        </div>
+
+        <button id="btn-done-rules" class="btn primary-btn" style="width: 100%; margin-top: 10px;">✔ GOT IT!</button>
       </div>
     </div>
 
