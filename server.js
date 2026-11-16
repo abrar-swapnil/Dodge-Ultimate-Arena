@@ -23,6 +23,8 @@ app.use((req, res, next) => {
 
 // In-memory HUD layouts store by user key
 const userHudLayouts = {};
+// Private in-memory Feedbacks store for developer (Abrar Swapnil)
+const feedbackStore = [];
 
 // Health check
 app.get("/", (req, res) => {
@@ -58,6 +60,39 @@ app.get("/api/hud-layout/:userId", (req, res) => {
     return res.json({ success: true, layout: data.layout });
   }
   return res.status(404).json({ success: false, message: "No layout found" });
+});
+
+// Receive Feedback & Bug Reports
+app.post("/api/feedback", (req, res) => {
+  const { name, email, type, message, deviceInfo } = req.body;
+  if (!message || !message.trim()) {
+    return res.status(400).json({ error: "Message is required" });
+  }
+
+  const feedbackEntry = {
+    id: "fb_" + Date.now(),
+    name: name || "Anonymous Player",
+    email: email || "Not provided",
+    type: type || "General",
+    message: message.trim(),
+    deviceInfo: deviceInfo || "Unknown",
+    receivedAt: new Date().toISOString(),
+  };
+
+  feedbackStore.unshift(feedbackEntry); // latest first
+  console.log(`[FEEDBACK] New feedback received from: ${feedbackEntry.name} (${feedbackEntry.type})`);
+  console.log(`           "${feedbackEntry.message}"`);
+
+  return res.json({ success: true, message: "Feedback received successfully!" });
+});
+
+// Private Feedbacks Endpoint (Only developer can view)
+app.get("/api/feedbacks", (req, res) => {
+  return res.json({
+    developer: "Abrar Swapnil (swapnil172294@gmail.com)",
+    total: feedbackStore.length,
+    feedbacks: feedbackStore,
+  });
 });
 
 const server = http.createServer(app);

@@ -222,6 +222,11 @@
         <button id="btn-open-rules-modal" class="btn secondary-btn rules-trigger-btn">
           📖 <span>HOW TO PLAY & GAME RULES</span>
         </button>
+
+        <!-- 7. Feedback & Bug Report Button -->
+        <button id="btn-open-feedback-modal" class="btn secondary-btn feedback-trigger-btn">
+          💬 <span>SEND FEEDBACK / REPORT BUG</span>
+        </button>
       </div>
     </div>
 
@@ -258,6 +263,49 @@
         </div>
 
         <button id="btn-done-rules" class="btn primary-btn" style="width: 100%; margin-top: 10px;">✔ GOT IT!</button>
+      </div>
+    </div>
+
+    <!-- Feedback & Bug Report Modal Overlay -->
+    <div id="feedback-modal-overlay" class="modal-backdrop hidden">
+      <div class="menu-modal feedback-modal-window">
+        <div class="panel-header">
+          <h3 style="color: #38bdf8;">💬 SEND FEEDBACK / REPORT BUG</h3>
+          <button id="btn-close-feedback-modal" class="text-btn">✖ Close</button>
+        </div>
+        <p class="tagline">Found a bug or have an awesome idea? Your message goes directly to Abrar Swapnil!</p>
+
+        <form id="feedback-form" class="feedback-form">
+          <div class="form-group">
+            <label class="form-label">Feedback Type:</label>
+            <div class="feedback-type-group">
+              <button type="button" class="fb-type-btn active" data-type="Bug Report">🐞 Bug</button>
+              <button type="button" class="fb-type-btn" data-type="Feature Idea">💡 Idea</button>
+              <button type="button" class="fb-type-btn" data-type="Praise">💖 Praise</button>
+              <button type="button" class="fb-type-btn" data-type="Other">⚙️ Other</button>
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Your Name / Gamer Tag (Optional):</label>
+            <input type="text" id="fb-user-name" class="fb-input" placeholder="e.g. ShadowDodge" maxlength="40">
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Your Email (Optional, if you want a reply):</label>
+            <input type="email" id="fb-user-email" class="fb-input" placeholder="e.g. you@example.com">
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Your Message / Bug Details <span style="color:#ef4444;">*</span>:</label>
+            <textarea id="fb-user-message" class="fb-textarea" placeholder="Explain what happened or your improvement idea..." required rows="4"></textarea>
+          </div>
+
+          <button type="submit" id="btn-submit-feedback" class="btn primary-btn" style="width: 100%; margin-top: 6px;">
+            🚀 SEND FEEDBACK
+          </button>
+          <div id="feedback-status-msg" class="status-msg" style="text-align: center; margin-top: 4px;"></div>
+        </form>
       </div>
     </div>
 

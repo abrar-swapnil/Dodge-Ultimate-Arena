@@ -1145,6 +1145,83 @@
         document.getElementById("rules-modal-overlay")?.classList.add("hidden");
       });
 
+      // Feedback & Bug Report Modal Open / Close
+      document.getElementById("btn-open-feedback-modal")?.addEventListener("click", () => {
+        document.getElementById("feedback-modal-overlay")?.classList.remove("hidden");
+      });
+      document.getElementById("btn-close-feedback-modal")?.addEventListener("click", () => {
+        document.getElementById("feedback-modal-overlay")?.classList.add("hidden");
+      });
+
+      // Feedback Type Selection
+      let selectedFeedbackType = "Bug Report";
+      document.querySelectorAll(".fb-type-btn").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          document.querySelectorAll(".fb-type-btn").forEach((b) => b.classList.remove("active"));
+          btn.classList.add("active");
+          selectedFeedbackType = btn.getAttribute("data-type") || "General";
+        });
+      });
+
+      // Feedback Form Submit Handler
+      const feedbackForm = document.getElementById("feedback-form");
+      feedbackForm?.addEventListener("submit", (e) => {
+        e.preventDefault();
+        const submitBtn = document.getElementById("btn-submit-feedback");
+        const statusMsg = document.getElementById("feedback-status-msg");
+        const name = document.getElementById("fb-user-name")?.value.trim();
+        const email = document.getElementById("fb-user-email")?.value.trim();
+        const message = document.getElementById("fb-user-message")?.value.trim();
+
+        if (!message) return;
+
+        if (submitBtn) {
+          submitBtn.disabled = true;
+          submitBtn.innerText = "⏳ Sending...";
+        }
+        if (statusMsg) statusMsg.innerText = "";
+
+        const payload = {
+          name: name || "Anonymous Player",
+          email: email || "Not provided",
+          type: selectedFeedbackType,
+          message,
+          deviceInfo: `${IS_MOBILE ? "Mobile" : "Desktop"} (${window.innerWidth}x${window.innerHeight})`,
+          targetEmail: "swapnil172294@gmail.com",
+        };
+
+        // 1. Send to Formspree direct to swapnil172294@gmail.com
+        const formspreePromise = fetch("https://formspree.io/f/xvgzlowy", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "Accept": "application/json" },
+          body: JSON.stringify(payload),
+        }).catch(() => {});
+
+        // 2. Backup send to Render Backend Server (/api/feedback)
+        const serverUrl = IS_PROD ? "https://dodge-ultimate-arena.onrender.com" : "http://localhost:9000";
+        const renderPromise = fetch(`${serverUrl}/api/feedback`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        }).catch(() => {});
+
+        Promise.allSettled([formspreePromise, renderPromise]).then(() => {
+          if (submitBtn) {
+            submitBtn.disabled = false;
+            submitBtn.innerText = "🚀 SEND FEEDBACK";
+          }
+          if (statusMsg) {
+            statusMsg.style.color = "#10b981";
+            statusMsg.innerText = "✅ Thank you! Your feedback has been sent to Abrar Swapnil!";
+          }
+          setTimeout(() => {
+            feedbackForm.reset();
+            document.getElementById("feedback-modal-overlay")?.classList.add("hidden");
+            if (statusMsg) statusMsg.innerText = "";
+          }, 1800);
+        });
+      });
+
       // Rules Translate in Bangla / English toggle
       const translateBtn = document.getElementById("btn-translate-rules");
       const rulesEn = document.getElementById("rules-en");
