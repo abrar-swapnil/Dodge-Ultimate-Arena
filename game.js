@@ -1059,6 +1059,23 @@
 
     // --- DOM Setup ---
     setupDOM() {
+      // 0. Opening Splash Screen Trigger
+      const splashScreen = document.getElementById("splash-screen");
+      const enterMenuFromSplash = () => {
+        if (!splashScreen || splashScreen.classList.contains("hidden")) return;
+        this.sounds._init();
+        this.sounds.playCollect();
+        splashScreen.classList.add("hidden");
+        this.showMenu();
+      };
+      splashScreen?.addEventListener("click", enterMenuFromSplash);
+      splashScreen?.addEventListener("pointerdown", enterMenuFromSplash);
+      window.addEventListener("keydown", (e) => {
+        if (e.code === "Enter" || e.code === "Space") {
+          enterMenuFromSplash();
+        }
+      });
+
       // Menu and Top Bar
       document.getElementById("pause-btn")?.addEventListener("click", () => this.togglePause());
       document.getElementById("menu-btn")?.addEventListener("click", () => this.showMenu());
@@ -1105,6 +1122,34 @@
       document.getElementById("btn-save-hud")?.addEventListener("click", () => this.saveHudLayout());
       document.getElementById("btn-reset-hud")?.addEventListener("click", () => this.resetHudLayout());
       document.getElementById("btn-close-hud")?.addEventListener("click", () => this.closeHudEditor());
+
+      // Character Modal Windows Open/Close
+      document.getElementById("btn-open-char-modal")?.addEventListener("click", () => {
+        document.getElementById("char-modal-overlay")?.classList.remove("hidden");
+      });
+      document.getElementById("btn-close-char-modal")?.addEventListener("click", () => {
+        document.getElementById("char-modal-overlay")?.classList.add("hidden");
+      });
+      document.getElementById("btn-confirm-char")?.addEventListener("click", () => {
+        document.getElementById("char-modal-overlay")?.classList.add("hidden");
+      });
+
+      // Rules Translate in Bangla / English toggle
+      const translateBtn = document.getElementById("btn-translate-rules");
+      const rulesEn = document.getElementById("rules-en");
+      const rulesBn = document.getElementById("rules-bn");
+      translateBtn?.addEventListener("click", () => {
+        const isEnglishActive = !rulesEn.classList.contains("hidden");
+        if (isEnglishActive) {
+          rulesEn.classList.add("hidden");
+          rulesBn.classList.remove("hidden");
+          translateBtn.innerText = "🌐 Read in English";
+        } else {
+          rulesBn.classList.add("hidden");
+          rulesEn.classList.remove("hidden");
+          translateBtn.innerText = "🌐 Translate in বাংলা";
+        }
+      });
 
       // Character Shape Selection
       document.querySelectorAll(".shape-btn").forEach((btn) => {

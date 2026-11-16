@@ -121,55 +121,34 @@
       🎮 Move: WASD / Arrows • SHIFT (Hold): Sprint (20s CD) • SPACE: Dash • F: Push • B: Emergency Dodge (3x) • E: Beam (Giant)
     </div>
 
+    <!-- Opening Animated Splash Screen Interface -->
+    <div id="splash-screen" class="splash-backdrop">
+      <div class="splash-content">
+        <div class="splash-badge">✦ ARCADE ULTIMATE ✦</div>
+        <h1 class="splash-title">DODGE ARENA</h1>
+        <p class="splash-creator">Made with ❤️ by <span class="creator-name">Abrar Swapnil</span></p>
+        
+        <div class="splash-prompt">
+          <span class="tap-hand">👉</span>
+          <span class="prompt-text">TAP SCREEN OR PRESS ENTER TO START</span>
+          <span class="tap-hand">👈</span>
+        </div>
+      </div>
+    </div>
+
     <!-- Main Menu Modal Overlay -->
-    <div id="modal-overlay" class="modal-backdrop">
+    <div id="modal-overlay" class="modal-backdrop hidden">
       <div class="menu-modal">
         <h1 class="game-logo">DODGE ARENA</h1>
-        <p class="tagline">Survive. Evolve. Conquer the Boss.</p>
+        <p class="tagline">Survive • Evolve • Slay the Titan Bosses</p>
 
-        <!-- Difficulty Selection -->
-        <div class="diff-selection-section">
-          <label class="section-label">Select Difficulty:</label>
-          <div class="diff-btn-group">
-            <button class="diff-pill active" data-diff="NORMAL">Normal</button>
-            <button class="diff-pill" data-diff="MEDIUM">Medium</button>
-            <button class="diff-pill" data-diff="HARD">Hard</button>
-            <button class="diff-pill" data-diff="ULTRA">Ultra Hard</button>
-            <button class="diff-pill danger" data-diff="EXTREME">Extreme</button>
-          </div>
-        </div>
-
-        <!-- Character Avatar & Shape Customizer -->
-        <div class="character-custom-section">
-          <div class="char-header">
-            <label class="section-label">Choose Character / Avatar:</label>
-            <span id="char-active-preview-label" class="char-label-tag">Cube</span>
-          </div>
-          <div class="char-options-row">
-            <div class="shape-picker">
-              <button class="shape-btn active" data-shape="square" title="Neon Square">🟦 Square</button>
-              <button class="shape-btn" data-shape="circle" title="Energy Sphere">🟢 Circle</button>
-              <button class="shape-btn" data-shape="triangle" title="Space Arrow">🔺 Ship</button>
-              <button class="shape-btn" data-shape="diamond" title="Crystal Diamond">💎 Gem</button>
-              <button class="shape-btn" data-shape="star" title="Cosmic Star">⭐ Star</button>
-            </div>
-            <div class="custom-photo-uploader">
-              <label for="char-photo-input" class="photo-upload-label" id="photo-upload-btn">
-                <span id="photo-preview-icon">📷</span>
-                <span id="photo-upload-text">Upload Photo</span>
-              </label>
-              <input type="file" id="char-photo-input" accept="image/*" class="hidden">
-              <button id="btn-remove-photo" class="text-btn hidden" title="Remove custom photo">✖ Reset</button>
-            </div>
-          </div>
-        </div>
-
+        <!-- 1 & 2. Solo & Multiplayer Modes -->
         <div class="mode-cards">
           <button id="btn-mode-solo" class="mode-card highlight">
             <div class="mode-icon">🎯</div>
             <div class="mode-info">
               <h3>SOLO CAMPAIGN</h3>
-              <p>Map 1 (0-19) ➔ Map 2 (20+) ➔ Map 3 (50+) ➔ Boss Mission (100+) ➔ Level 2!</p>
+              <p>Map 1 ➔ Map 2 ➔ Map 3 ➔ Titan Boss ➔ Level 2 Cyber Core!</p>
             </div>
           </button>
 
@@ -182,7 +161,25 @@
           </button>
         </div>
 
-        <!-- Customize HUD Button -->
+        <!-- 3. Difficulty Selection -->
+        <div class="diff-selection-section">
+          <label class="section-label">⚡ SELECT DIFFICULTY:</label>
+          <div class="diff-btn-group">
+            <button class="diff-pill active" data-diff="NORMAL">Normal</button>
+            <button class="diff-pill" data-diff="MEDIUM">Medium</button>
+            <button class="diff-pill" data-diff="HARD">Hard</button>
+            <button class="diff-pill" data-diff="ULTRA">Ultra Hard</button>
+            <button class="diff-pill danger" data-diff="EXTREME">Extreme</button>
+          </div>
+        </div>
+
+        <!-- 4. Open Character & Avatar Studio Button -->
+        <button id="btn-open-char-modal" class="btn secondary-btn char-custom-trigger">
+          👤 <span>CHARACTER & AVATAR STUDIO</span>
+          <span id="char-active-preview-label" class="char-label-tag">Cube</span>
+        </button>
+
+        <!-- 5. Customize HUD Button -->
         <button id="btn-open-hud-editor" class="btn secondary-btn hud-custom-trigger">
           ⚙️ <span>CUSTOMIZE TOUCH CONTROLS (HUD)</span>
         </button>
@@ -221,12 +218,72 @@
           </div>
         </div>
 
-        <!-- Roadmap / Guide -->
-        <div class="how-to-play">
-          <strong>🗺️ Progression:</strong> 20 pts (Map 2 Magma) • 50 pts (Map 3 Abyss) • 100 pts (Level 1 Boss Fight) • 120 pts (Level 2).<br>
-          <strong>👾 Boss Fight:</strong> Boss summons swarms & charges Burst! Use <strong>Emergency Dodge (3x)</strong> to survive.<br>
-          <strong>👑 Multiplayer Giant:</strong> Reach 25 pts to become Giant & shoot 20s Beam ('E' / Button). Rival must survive to 30 pts to win!
+        <!-- 6. How To Play & Rules with Translation in Bangla -->
+        <div class="how-to-play-box">
+          <div class="how-to-header">
+            <span class="how-title">📖 HOW TO PLAY & RULES</span>
+            <button id="btn-translate-rules" class="translate-btn">🌐 Translate in বাংলা</button>
+          </div>
+
+          <!-- English Version (Default) -->
+          <div id="rules-en" class="rules-text">
+            <p><strong>• Movement:</strong> Move player using Joystick (Mobile) or WASD / Arrow keys (Laptop).</p>
+            <p><strong>• Lives & Health:</strong> You have <strong>3 Lives (❤️❤️❤️)</strong>. Taking a hit triggers a 3s safe i-frame blink and repels enemies!</p>
+            <p><strong>• Abilities:</strong> Hold <strong>Shift / 🏃 Sprint</strong> for 1.8x speed boost (20s CD). Use <strong>Space / ⚡ Dash</strong>, <strong>F / 💥 Push</strong>, and <strong>B / 🛡️ Dodge (3x)</strong>.</p>
+            <p><strong>• Progression:</strong> 20 pts (Map 2 Magma) ➔ 50 pts (Map 3 Abyss) ➔ 100 pts (Titan Boss Fight) ➔ Level 2 Cyber Core ➔ Final Boss at 250 pts!</p>
+            <p><strong>• Slay Bosses:</strong> Push Boss with <strong>💥 Shockwave (-20 HP)</strong> and collect <strong>⚡ Golden Orbs (-25 HP)</strong> to destroy the Boss!</p>
+            <p><strong>• Multiplayer:</strong> First to 25 pts becomes a Giant with Beam Cannon (E). First to 30 pts wins!</p>
+          </div>
+
+          <!-- Bangla Version (Toggled on click) -->
+          <div id="rules-bn" class="rules-text hidden">
+            <p><strong>• মুভমেন্ট:</strong> মোবাইলে ভার্চুয়াল জয়স্টিক এবং ল্যাপটপে WASD বা Arrow keys চেপে মুভ করো।</p>
+            <p><strong>• লাইফ সিস্টেম:</strong> তোমার <strong>৩টি জীবন (❤️❤️❤️)</strong> থাকবে। আঘাত খেলে ৩ সেকেন্ডের সেফ আই-ফ্রেম ব্লিঙ্ক পাবে এবং শত্রুরা ছিটকে দূরে সরে যাবে!</p>
+            <p><strong>• স্পেশাল ক্ষমতা:</strong> <strong>Shift / 🏃 Sprint</strong> ধরে রাখলে ১.৮ গুণ গতি বাড়বে (২০ সেকেন্ড কুলডাউন)। এছাড়াও রয়েছে <strong>Space / ⚡ Dash</strong>, <strong>F / 💥 Push</strong> এবং ৩ বার <strong>B / 🛡️ Emergency Dodge</strong>।</p>
+            <p><strong>• ম্যাপ ও লেভেল:</strong> ২০ পয়েন্টে (ম্যাপ ২ ম্যাগমা) ➔ ৫০ পয়েন্টে (ম্যাপ ৩ ভয়েড) ➔ ১০০ পয়েন্টে (লেভেল ১ টাইটান বস ফাইট) ➔ বস মারলে লেভেল ২ আনলক ➔ ২৫০ পয়েন্টে ফাইনাল বস!</p>
+            <p><strong>• বসকে বধ করার উপায়:</strong> বসের কাছে গিয়ে <strong>💥 Push মারলে (-২০ HP)</strong> এবং সোনালী <strong>⚡ Golden Orb সংগ্রহ করলে (-২৫ HP)</strong> মিসাইল গিয়ে বস ধ্বংস হবে!</p>
+            <p><strong>• মাল্টিপ্লেয়ার:</strong> যে আগে ২৫ পয়েন্ট পাবে সে জায়ান্ট হয়ে বিম কামান (E) ছুড়তে পারবে। ৩০ পয়েন্টে টিকে থাকলে ম্যাচ জয়!</p>
+          </div>
         </div>
+      </div>
+    </div>
+
+    <!-- Character & Avatar Studio Modal Overlay -->
+    <div id="char-modal-overlay" class="modal-backdrop hidden">
+      <div class="menu-modal char-modal-window">
+        <div class="panel-header">
+          <h3>👤 CHARACTER & AVATAR STUDIO</h3>
+          <button id="btn-close-char-modal" class="text-btn">✖ Close</button>
+        </div>
+        <p class="tagline">Customize your player shape or upload your own photo avatar!</p>
+
+        <!-- Shapes -->
+        <div class="char-section-block">
+          <label class="section-label">Select 2D Geometry Shape:</label>
+          <div class="shape-picker">
+            <button class="shape-btn active" data-shape="square" title="Neon Square">🟦 Square</button>
+            <button class="shape-btn" data-shape="circle" title="Energy Sphere">🟢 Circle</button>
+            <button class="shape-btn" data-shape="triangle" title="Space Arrow">🔺 Ship</button>
+            <button class="shape-btn" data-shape="diamond" title="Crystal Diamond">💎 Gem</button>
+            <button class="shape-btn" data-shape="star" title="Cosmic Star">⭐ Star</button>
+          </div>
+        </div>
+
+        <!-- Custom Photo Upload -->
+        <div class="char-section-block">
+          <label class="section-label">Or Upload Custom Profile / Photo Avatar:</label>
+          <div class="custom-photo-uploader">
+            <label for="char-photo-input" class="photo-upload-label" id="photo-upload-btn">
+              <span id="photo-preview-icon">📷</span>
+              <span id="photo-upload-text">Upload Custom Photo</span>
+            </label>
+            <input type="file" id="char-photo-input" accept="image/*" class="hidden">
+            <button id="btn-remove-photo" class="text-btn hidden" title="Remove custom photo">✖ Reset Photo</button>
+          </div>
+          <p class="hint-text">Your photo will be cropped into a balanced circle and synced with your opponent in multiplayer!</p>
+        </div>
+
+        <button id="btn-confirm-char" class="btn primary-btn" style="width: 100%; margin-top: 10px;">✔ SAVE & DONE</button>
       </div>
     </div>
 
