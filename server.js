@@ -148,6 +148,8 @@ app.post("/api/auth/register", (req, res) => {
       mpLosses: 0,
       bossesDefeated: 0,
       totalMatches: 0,
+      soloMaxLevel: 1,
+      mpMaxLevel: 1,
     },
     createdAt: new Date().toISOString(),
     lastLoginAt: new Date().toISOString(),
@@ -233,6 +235,8 @@ app.post("/api/auth/login-or-register", (req, res) => {
         mpLosses: 0,
         bossesDefeated: 0,
         totalMatches: 0,
+        soloMaxLevel: 1,
+        mpMaxLevel: 1,
       },
       createdAt: new Date().toISOString(),
       lastLoginAt: new Date().toISOString(),
@@ -280,6 +284,8 @@ app.post("/api/profile/save", (req, res) => {
       mpLosses: Math.max(user.stats?.mpLosses || 0, stats.mpLosses || 0),
       bossesDefeated: Math.max(user.stats?.bossesDefeated || 0, stats.bossesDefeated || 0),
       totalMatches: Math.max(user.stats?.totalMatches || 0, stats.totalMatches || 0),
+      soloMaxLevel: Math.max(user.stats?.soloMaxLevel || 1, stats.soloMaxLevel || 1),
+      mpMaxLevel: Math.max(user.stats?.mpMaxLevel || 1, stats.mpMaxLevel || 1),
     };
   }
 
@@ -302,7 +308,15 @@ function sanitizeProfile(user) {
     shape: user.shape || "square",
     photo: user.photo || null,
     hudLayout: user.hudLayout || null,
-    stats: user.stats || { highScore: 0, mpWins: 0, mpLosses: 0, bossesDefeated: 0, totalMatches: 0 },
+    stats: user.stats || {
+      highScore: 0,
+      mpWins: 0,
+      mpLosses: 0,
+      bossesDefeated: 0,
+      totalMatches: 0,
+      soloMaxLevel: 1,
+      mpMaxLevel: 1,
+    },
     createdAt: user.createdAt,
     lastLoginAt: user.lastLoginAt,
   };

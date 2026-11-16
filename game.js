@@ -2205,7 +2205,9 @@
       if (nameEl) nameEl.innerText = p.username;
       const wins = (p.stats && p.stats.mpWins) || 0;
       const hs = (p.stats && p.stats.highScore) || 0;
-      if (summaryEl) summaryEl.innerText = `Wins: ${wins} • Score: ${hs}`;
+      const sLvl = (p.stats && p.stats.soloMaxLevel) || 1;
+      const mpLvl = (p.stats && p.stats.mpMaxLevel) || 1;
+      if (summaryEl) summaryEl.innerText = `Wins: ${wins} • Score: ${hs} • Solo Lvl ${sLvl} • MP Lvl ${mpLvl}`;
       if (badgeEl) {
         if (p.photo) {
           badgeEl.innerHTML = `<img src="${p.photo}" alt="avatar" style="width:100%;height:100%;object-fit:cover;border-radius:50%;">`;
@@ -2241,6 +2243,8 @@
 
       document.getElementById("stat-mp-wins") && (document.getElementById("stat-mp-wins").innerText = s.mpWins || 0);
       document.getElementById("stat-high-score") && (document.getElementById("stat-high-score").innerText = s.highScore || 0);
+      document.getElementById("stat-solo-level") && (document.getElementById("stat-solo-level").innerText = `Lvl ${s.soloMaxLevel || 1}`);
+      document.getElementById("stat-mp-level") && (document.getElementById("stat-mp-level").innerText = `Lvl ${s.mpMaxLevel || 1}`);
       document.getElementById("stat-boss-kills") && (document.getElementById("stat-boss-kills").innerText = s.bossesDefeated || 0);
       document.getElementById("stat-matches-total") && (document.getElementById("stat-matches-total").innerText = s.totalMatches || 0);
 
@@ -2276,6 +2280,23 @@
         localStorage.setItem("dodgearena_gamer_profile", JSON.stringify(this.gamerProfile));
         this._updateLoggedInUI();
         this._updateProfileBar();
+      }
+    }
+
+    updateMaxLevel(mode, level) {
+      if (!this.gamerProfile) return;
+      if (!this.gamerProfile.stats) this.gamerProfile.stats = {};
+      const key = (mode === "CUSTOM_ROOM") ? "mpMaxLevel" : "soloMaxLevel";
+      const current = this.gamerProfile.stats[key] || 1;
+      if (level > current) {
+        this.gamerProfile.stats[key] = level;
+        localStorage.setItem("dodgearena_gamer_profile", JSON.stringify(this.gamerProfile));
+        this._updateLoggedInUI();
+        this._updateProfileBar();
+        const serverUrl = IS_PROD
+          ? "https://dodge-ultimate-arena.onrender.com"
+          : "http://localhost:9000";
+        this.syncProfileToCloud(serverUrl, true /* quiet */).catch(() => {});
       }
     }
 
@@ -2723,6 +2744,14 @@
         }
       }
 
+      // Track multiplayer level progression for guest
+      if (this.p1Score >= 25 || this.p2Score >= 25) {
+        this.updateMaxLevel("CUSTOM_ROOM", 2);
+      }
+      if (this.p1Score >= 30 || this.p2Score >= 30) {
+        this.updateMaxLevel("CUSTOM_ROOM", 3);
+      }
+
       // P1 (Host)
       this.p1.x = data.p1.x;
       this.p1.y = data.p1.y;
@@ -2938,6 +2967,7 @@
       this.setCautionBanner(false);
       this.updateHUD();
       this.showAnnouncement("MATCH STARTED", `DIFFICULTY: ${this.difficulty.name}`);
+      this.updateMaxLevel(this.mode, 1);
     }
 
     setCautionBanner(show, text = "CAUTION! TITAN BURST CHARGING!") {
@@ -3038,6 +3068,7 @@
       if (this.level === 1) {
         // Advance to Level 2
         this.level = 2;
+        this.updateMaxLevel("SOLO", 2);
         this.mapIndex = 1;
         this.enemies = []; // clear old enemies
         this.showAnnouncement("🏆 LEVEL 1 BOSS DEFEATED!", "LEVEL 2: CYBER CORE UNLOCKED (SCORE 250 FOR FINAL BOSS)!");
@@ -3045,6 +3076,7 @@
       } else if (this.level === 2) {
         // Victory! Game Completed!
         this.level = 3;
+        this.updateMaxLevel("SOLO", 3);
         this.state = "VICTORY";
         this.showAnnouncement("👑 VICTORY! YOU CONQUERED THE ARENA!", "CONGRATULATIONS! ULTIMATE DODGE CHAMPION!");
         this.sounds.playVictory();
@@ -3075,6 +3107,7 @@
       // If survived to 120 points without beating boss, auto advance to Level 2
       else if (score >= 120 && this.level === 1) {
         this.level = 2;
+        this.updateMaxLevel("SOLO", 2);
         this.mapIndex = 1;
         this.boss = null;
         this.showAnnouncement("LEVEL 2 MATCH STARTED!", "CONGRATULATIONS! CHALLENGE MULTIPLIED!");
@@ -3090,6 +3123,10 @@
 
       // Multiplayer 25 points Giant Transformation
       if (this.mode === "CUSTOM_ROOM") {
+        if (this.p1Score >= 25 || this.p2Score >= 25) {
+          this.updateMaxLevel("CUSTOM_ROOM", 2);
+        }
+
         if (this.p1Score >= 25 && !this.p1.isGiant) {
           this.p1.transformToGiant();
           this.showAnnouncement("PLAYER 1 TRANSFORMED!", "TITAN GIANT UNLOCKED BEAM CANNON (E)!");
@@ -3106,6 +3143,7 @@
           this.state = "MATCH_OVER";
           this.sounds.playVictory();
           this.broadcastState();
+          this.updateMaxLevel("CUSTOM_ROOM", 3);
           // Track stats for host (host = p1)
           if (this.gamerProfile) {
             this.incrementStat("totalMatches");
@@ -3115,6 +3153,7 @@
           this.state = "MATCH_OVER";
           this.sounds.playVictory();
           this.broadcastState();
+          this.updateMaxLevel("CUSTOM_ROOM", 3);
           // Track stats for host (host = p1, so they lost)
           if (this.gamerProfile) {
             this.incrementStat("totalMatches");
