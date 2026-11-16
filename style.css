@@ -505,7 +505,8 @@ html, body {
   }
 
   /* ── Mobile Portrait Menu & Modal Balance ─────────────────── */
-  .modal-backdrop {
+  /* Use :not(.hidden) so display:flex never overrides display:none on hidden modals */
+  .modal-backdrop:not(.hidden) {
     display: flex !important;
     align-items: flex-start !important;
     justify-content: center !important;
@@ -667,7 +668,7 @@ html, body {
   background: rgba(5, 5, 16, 0.88);
   backdrop-filter: blur(10px);
   -webkit-backdrop-filter: blur(10px);
-  display: flex;
+  display: none; /* hidden by default; shown when .hidden is removed */
   align-items: center;
   justify-content: center;
   z-index: 50;
@@ -675,6 +676,9 @@ html, body {
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
   transition: opacity 0.25s ease;
+}
+.modal-backdrop:not(.hidden) {
+  display: flex; /* only shown when not hidden */
 }
 
 .menu-modal {

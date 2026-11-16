@@ -2024,14 +2024,10 @@
         const savedProfile = JSON.parse(localStorage.getItem("dodgearena_gamer_profile") || "null");
         if (savedCreds && savedProfile && savedProfile.username &&
             savedProfile.username.toLowerCase() === savedCreds.username.toLowerCase()) {
-          // Set profile data instantly — but do NOT open account modal
+          // Set profile data instantly — only update the profile bar, never touch account modal
           this.gamerProfile = { ...savedProfile, offline: false };
-          // Update profile bar display only (not the modal)
           this._updateProfileBar();
-          // Pre-fill logged-in view in account modal (hidden), so it's ready when user opens it
-          document.getElementById("account-logged-out-view")?.classList.add("hidden");
-          document.getElementById("account-logged-in-view")?.classList.remove("hidden");
-          this._updateLoggedInUI();
+          // NOTE: Do NOT manipulate account modal views here — modal is hidden, let it be
         }
       } catch (e) {}
 
