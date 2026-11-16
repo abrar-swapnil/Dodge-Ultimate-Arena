@@ -1921,11 +1921,13 @@
     // --- Custom HUD Layout & Cloud Persistence ---
     initUserAndLoadHUD() {
       // Load saved character customization
+      const savedCreds = this._getStoredCreds();
       const savedShape = localStorage.getItem("dodgearena_char_shape") || "square";
       const savedPhoto = localStorage.getItem("dodgearena_char_photo");
-      if (savedPhoto) {
+      if (savedCreds && savedPhoto) {
         this.setPlayerPhoto(savedPhoto, false);
       } else {
+        localStorage.removeItem("dodgearena_char_photo");
         this.setPlayerShape(savedShape, false);
       }
 
@@ -2226,21 +2228,23 @@
 
       const endpoint = mode === "register" ? `${serverUrl}/api/auth/register` : `${serverUrl}/api/auth/login`;
 
-      // Read client backup from local vault for Auto-Healing
+      // Read client backup from local vault for Auto-Healing (login mode only)
       let clientBackup = null;
-      try {
-        const vault = JSON.parse(localStorage.getItem("dodgearena_account_vault") || "{}");
-        const lowerName = username.toLowerCase();
-        if (vault[lowerName]) {
-          clientBackup = vault[lowerName];
-        } else {
-          const currentProfile = JSON.parse(localStorage.getItem("dodgearena_gamer_profile") || "null");
-          const savedCreds = JSON.parse(localStorage.getItem("dodgearena_gamer_credentials") || "null");
-          if (currentProfile && currentProfile.username && currentProfile.username.toLowerCase() === lowerName) {
-            clientBackup = { ...currentProfile, pin: (savedCreds && savedCreds.pin) ? savedCreds.pin : pin };
+      if (mode === "login") {
+        try {
+          const vault = JSON.parse(localStorage.getItem("dodgearena_account_vault") || "{}");
+          const lowerName = username.toLowerCase();
+          if (vault[lowerName]) {
+            clientBackup = vault[lowerName];
+          } else {
+            const currentProfile = JSON.parse(localStorage.getItem("dodgearena_gamer_profile") || "null");
+            const savedCreds = JSON.parse(localStorage.getItem("dodgearena_gamer_credentials") || "null");
+            if (currentProfile && currentProfile.username && currentProfile.username.toLowerCase() === lowerName) {
+              clientBackup = { ...currentProfile, pin: (savedCreds && savedCreds.pin) ? savedCreds.pin : pin };
+            }
           }
-        }
-      } catch (e) {}
+        } catch (e) {}
+      }
 
       return fetch(endpoint, {
         method: "POST",
@@ -2379,6 +2383,7 @@
         const lowerName = profile.username.toLowerCase();
         vault[lowerName] = {
           ...profile,
+          photo: profile.photo || null,
           pin: pinVal || vault[lowerName]?.pin || "",
         };
         localStorage.setItem("dodgearena_account_vault", JSON.stringify(vault));

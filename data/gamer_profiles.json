@@ -16,5 +16,23 @@
     },
     "createdAt": "2026-11-16T20:50:00.000Z",
     "lastLoginAt": "2026-11-16T21:30:00.000Z"
+  },
+  "farhan": {
+    "username": "Farhan",
+    "pin": "1234",
+    "shape": "square",
+    "photo": null,
+    "hudLayout": null,
+    "stats": {
+      "highScore": 0,
+      "mpWins": 0,
+      "mpLosses": 0,
+      "bossesDefeated": 0,
+      "totalMatches": 0,
+      "soloMaxLevel": 1,
+      "mpMaxLevel": 1
+    },
+    "createdAt": "2026-11-16T22:49:11.779Z",
+    "lastLoginAt": "2026-11-16T22:57:52.136Z"
   }
 }
