@@ -2253,7 +2253,33 @@
               "dodgearena_gamer_credentials",
               JSON.stringify({ username, pin })
             );
-            this.onLoginSuccess(data.profile);
+
+            if (silent && this.gamerProfile) {
+              // Silent background sync: merge server data with local — take the BEST of each stat
+              // so a device with higher score doesn't get downgraded by another device's stale server data
+              const srv = data.profile.stats || {};
+              const loc = this.gamerProfile.stats || {};
+              const mergedStats = {
+                highScore:      Math.max(srv.highScore      || 0, loc.highScore      || 0),
+                mpWins:         Math.max(srv.mpWins         || 0, loc.mpWins         || 0),
+                mpLosses:       Math.max(srv.mpLosses       || 0, loc.mpLosses       || 0),
+                bossesDefeated: Math.max(srv.bossesDefeated || 0, loc.bossesDefeated || 0),
+                totalMatches:   Math.max(srv.totalMatches   || 0, loc.totalMatches   || 0),
+                soloMaxLevel:   Math.max(srv.soloMaxLevel   || 1, loc.soloMaxLevel   || 1),
+                mpMaxLevel:     Math.max(srv.mpMaxLevel     || 1, loc.mpMaxLevel     || 1),
+              };
+              const mergedProfile = { ...data.profile, stats: mergedStats, offline: false };
+              this.onLoginSuccess(mergedProfile);
+              // If local had higher stats, push the merged data back to server
+              const needsUpload = Object.keys(mergedStats).some(k => mergedStats[k] > (srv[k] || (k.includes('Level') ? 1 : 0)));
+              if (needsUpload) {
+                const serverUrl = IS_PROD ? "https://dodge-ultimate-arena.onrender.com" : "http://localhost:9000";
+                this.syncProfileToCloud(serverUrl, true).catch(() => {});
+              }
+            } else {
+              this.onLoginSuccess(data.profile);
+            }
+
             const suggestionsBox = document.getElementById("username-suggestions");
             if (suggestionsBox) suggestionsBox.classList.add("hidden");
 
@@ -2464,6 +2490,11 @@
         localStorage.setItem("dodgearena_gamer_profile", JSON.stringify(this.gamerProfile));
         this._updateLoggedInUI();
         this._updateProfileBar();
+        // Sync new high score to cloud so it appears on all devices
+        const serverUrl = IS_PROD
+          ? "https://dodge-ultimate-arena.onrender.com"
+          : "http://localhost:9000";
+        this.syncProfileToCloud(serverUrl, true /* quiet */).catch(() => {});
       }
     }
 
