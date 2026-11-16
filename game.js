@@ -1652,16 +1652,18 @@
         }
       };
       const onSprintStop = (e) => {
-        if (e && e.cancelable) e.preventDefault();
         const p = getActivePlayer();
-        p.stopSprint();
-        sprintBtn?.classList.remove("sprinting");
-        if (this.mode === "CUSTOM_ROOM" && !this.isHost && this.conn) this.conn.send({ type: "STOP_SPRINT" });
+        if (p.isSprinting) {
+          p.stopSprint();
+          sprintBtn?.classList.remove("sprinting");
+          if (this.mode === "CUSTOM_ROOM" && !this.isHost && this.conn) this.conn.send({ type: "STOP_SPRINT" });
+        }
       };
 
       sprintBtn?.addEventListener("pointerdown", onSprintStart);
-      window.addEventListener("pointerup", onSprintStop);
-      window.addEventListener("pointercancel", onSprintStop);
+      sprintBtn?.addEventListener("pointerup", onSprintStop);
+      sprintBtn?.addEventListener("pointercancel", onSprintStop);
+      sprintBtn?.addEventListener("pointerleave", onSprintStop);
 
       // Dash
       const dashBtn = document.getElementById("dash-btn");
@@ -2186,24 +2188,72 @@
       this.p1Score = data.p1Score;
       this.p2Score = data.p2Score;
 
+      // P1 (Host)
       this.p1.x = data.p1.x;
       this.p1.y = data.p1.y;
       this.p1.isGiant = data.p1.isGiant;
       this.p1.size = data.p1.size;
       this.p1.activeBeam = data.p1.activeBeam;
       this.p1.isAlive = data.p1.isAlive;
+      if (data.p1.lives !== undefined) this.p1.lives = data.p1.lives;
+      if (data.p1.emerDodges !== undefined) this.p1.emerDodges = data.p1.emerDodges;
+      if (data.p1.invulnerableTimer !== undefined) this.p1.invulnerableTimer = data.p1.invulnerableTimer;
+      if (data.p1.shockwaveVisual) this.p1.shockwaveVisual = data.p1.shockwaveVisual;
 
-      this.p2.x = data.p2.x;
-      this.p2.y = data.p2.y;
+      // P2 (Guest) - Smooth reconciliation with local client prediction
+      const p2Desync = Math.hypot(this.p2.x - data.p2.x, this.p2.y - data.p2.y);
+      if (p2Desync > 45) {
+        this.p2.x = data.p2.x;
+        this.p2.y = data.p2.y;
+      } else {
+        this.p2.x += (data.p2.x - this.p2.x) * 0.35;
+        this.p2.y += (data.p2.y - this.p2.y) * 0.35;
+      }
       this.p2.isGiant = data.p2.isGiant;
       this.p2.size = data.p2.size;
       this.p2.activeBeam = data.p2.activeBeam;
       this.p2.isAlive = data.p2.isAlive;
+      if (data.p2.lives !== undefined) this.p2.lives = data.p2.lives;
+      if (data.p2.emerDodges !== undefined) this.p2.emerDodges = data.p2.emerDodges;
+      if (data.p2.invulnerableTimer !== undefined) this.p2.invulnerableTimer = data.p2.invulnerableTimer;
+      if (data.p2.shockwaveVisual) this.p2.shockwaveVisual = data.p2.shockwaveVisual;
 
-      this.enemies = data.enemies.map(e => new Enemy(e.x, e.y, this.difficulty.enemySpeed));
+      // Reconcile cooldowns if host reports higher cooldown
+      if (data.p2.dashCooldown !== undefined && data.p2.dashCooldown > this.p2.dashCooldown) {
+        this.p2.dashCooldown = data.p2.dashCooldown;
+      }
+      if (data.p2.pushCooldown !== undefined && data.p2.pushCooldown > this.p2.pushCooldown) {
+        this.p2.pushCooldown = data.p2.pushCooldown;
+      }
+      if (data.p2.beamCooldown !== undefined && data.p2.beamCooldown > this.p2.beamCooldown) {
+        this.p2.beamCooldown = data.p2.beamCooldown;
+      }
 
+      // Memory-efficient enemy update (eliminates garbage collection pauses & stutter on mobile)
+      if (!this.enemies) this.enemies = [];
+      const enLen = data.enemies.length;
+      while (this.enemies.length < enLen) {
+        this.enemies.push(new Enemy(0, 0, this.difficulty.enemySpeed));
+      }
+      this.enemies.length = enLen;
+      for (let i = 0; i < enLen; i++) {
+        this.enemies[i].x = data.enemies[i].x;
+        this.enemies[i].y = data.enemies[i].y;
+      }
+
+      // Memory-efficient items update
       if (data.items) {
-        this.items = data.items.map(it => new Collectible(it.x, it.y, it.points));
+        if (!this.items) this.items = [];
+        const itLen = data.items.length;
+        while (this.items.length < itLen) {
+          this.items.push(new Collectible(0, 0, 10));
+        }
+        this.items.length = itLen;
+        for (let i = 0; i < itLen; i++) {
+          this.items[i].x = data.items[i].x;
+          this.items[i].y = data.items[i].y;
+          this.items[i].points = data.items[i].points;
+        }
       }
 
       if (data.boss) {
@@ -2512,12 +2562,50 @@
         if (this.announcement.timer <= 0) this.announcement = null;
       }
 
+      // Guest throttled input send (send immediately if changed, else at ~30Hz)
       if (this.mode === "CUSTOM_ROOM" && !this.isHost && this.conn && this.conn.open) {
         const myInput = (this.myRole === "p2") ? this.p2Input : this.p1Input;
-        this.conn.send({ type: "INPUT", x: myInput.x, y: myInput.y });
+        this.inputSendTimer = (this.inputSendTimer || 0) + dt;
+        const inputChanged = Math.abs(myInput.x - (this.lastSentInputX || 0)) > 0.02 ||
+                             Math.abs(myInput.y - (this.lastSentInputY || 0)) > 0.02;
+        if (inputChanged || this.inputSendTimer >= 0.035) {
+          this.inputSendTimer = 0;
+          this.lastSentInputX = myInput.x;
+          this.lastSentInputY = myInput.y;
+          this.conn.send({ type: "INPUT", x: myInput.x, y: myInput.y });
+        }
       }
 
-      if (this.mode === "CUSTOM_ROOM" && !this.isHost) return;
+      if (this.mode === "CUSTOM_ROOM" && !this.isHost) {
+        // Run guest local simulation:
+        // 1. Client prediction for self so movement is instantaneous & responsive
+        const myPlayer = (this.myRole === "p2") ? this.p2 : this.p1;
+        const myInput = (this.myRole === "p2") ? this.p2Input : this.p1Input;
+        myPlayer.update(myInput.x, myInput.y, dt);
+
+        // 2. Decrement cooldowns & timers on rival player locally as well
+        const rival = (myPlayer === this.p1) ? this.p2 : this.p1;
+        if (rival.dashCooldown > 0) rival.dashCooldown = Math.max(0, rival.dashCooldown - dt);
+        if (rival.pushCooldown > 0) rival.pushCooldown = Math.max(0, rival.pushCooldown - dt);
+        if (rival.beamCooldown > 0) rival.beamCooldown = Math.max(0, rival.beamCooldown - dt);
+        if (rival.sprintCooldown > 0) rival.sprintCooldown = Math.max(0, rival.sprintCooldown - dt);
+        if (rival.invulnerableTimer > 0) rival.invulnerableTimer = Math.max(0, rival.invulnerableTimer - dt);
+
+        // 3. Update floating texts & particles so they animate & fade
+        for (let i = this.floatingTexts.length - 1; i >= 0; i--) {
+          this.floatingTexts[i].update(dt);
+          if (this.floatingTexts[i].alpha <= 0) this.floatingTexts.splice(i, 1);
+        }
+        for (let i = this.particles.length - 1; i >= 0; i--) {
+          this.particles[i].update(dt);
+          if (this.particles[i].alpha <= 0) this.particles.splice(i, 1);
+        }
+
+        // 4. Update HUD every frame so cooldown overlays animate smoothly at 60 FPS
+        this.updateHUD();
+
+        return;
+      }
 
       // Update Texts & Particles
       for (let i = this.floatingTexts.length - 1; i >= 0; i--) {
@@ -2581,21 +2669,55 @@
       this.checkCollisions();
       this.updateHUD();
 
-      // Broadcast state to Guest if Host
+      // Broadcast state to Guest if Host (throttled to 25Hz to prevent mobile network choking)
+      this.stateBroadcastTimer = (this.stateBroadcastTimer || 0) + dt;
       if (this.mode === "CUSTOM_ROOM" && this.isHost && this.conn && this.conn.open) {
-        this.conn.send({
-          type: "STATE",
-          state: this.state,
-          level: this.level,
-          mapIndex: this.mapIndex,
-          p1Score: this.p1Score,
-          p2Score: this.p2Score,
-          p1: { x: this.p1.x, y: this.p1.y, isGiant: this.p1.isGiant, size: this.p1.size, activeBeam: this.p1.activeBeam, isAlive: this.p1.isAlive },
-          p2: { x: this.p2.x, y: this.p2.y, isGiant: this.p2.isGiant, size: this.p2.size, activeBeam: this.p2.activeBeam, isAlive: this.p2.isAlive },
-          enemies: this.enemies.map(e => ({ x: e.x, y: e.y })),
-          items: this.items.map(it => ({ x: it.x, y: it.y, points: it.points })),
-          boss: this.boss ? { x: this.boss.x, y: this.boss.y, isChargingBurst: this.boss.isChargingBurst, burstVisual: this.boss.burstVisual } : null,
-        });
+        if (this.stateBroadcastTimer >= 0.04) {
+          this.stateBroadcastTimer = 0;
+          this.conn.send({
+            type: "STATE",
+            state: this.state,
+            level: this.level,
+            mapIndex: this.mapIndex,
+            p1Score: this.p1Score,
+            p2Score: this.p2Score,
+            p1: {
+              x: Math.round(this.p1.x),
+              y: Math.round(this.p1.y),
+              isGiant: this.p1.isGiant,
+              size: this.p1.size,
+              activeBeam: this.p1.activeBeam,
+              isAlive: this.p1.isAlive,
+              lives: this.p1.lives,
+              emerDodges: this.p1.emerDodges,
+              dashCooldown: Math.round(this.p1.dashCooldown * 10) / 10,
+              pushCooldown: Math.round(this.p1.pushCooldown * 10) / 10,
+              beamCooldown: Math.round(this.p1.beamCooldown * 10) / 10,
+              sprintCooldown: Math.round(this.p1.sprintCooldown * 10) / 10,
+              invulnerableTimer: Math.round(this.p1.invulnerableTimer * 10) / 10,
+              shockwaveVisual: this.p1.shockwaveVisual,
+            },
+            p2: {
+              x: Math.round(this.p2.x),
+              y: Math.round(this.p2.y),
+              isGiant: this.p2.isGiant,
+              size: this.p2.size,
+              activeBeam: this.p2.activeBeam,
+              isAlive: this.p2.isAlive,
+              lives: this.p2.lives,
+              emerDodges: this.p2.emerDodges,
+              dashCooldown: Math.round(this.p2.dashCooldown * 10) / 10,
+              pushCooldown: Math.round(this.p2.pushCooldown * 10) / 10,
+              beamCooldown: Math.round(this.p2.beamCooldown * 10) / 10,
+              sprintCooldown: Math.round(this.p2.sprintCooldown * 10) / 10,
+              invulnerableTimer: Math.round(this.p2.invulnerableTimer * 10) / 10,
+              shockwaveVisual: this.p2.shockwaveVisual,
+            },
+            enemies: this.enemies.map(e => ({ x: Math.round(e.x), y: Math.round(e.y) })),
+            items: this.items.map(it => ({ x: Math.round(it.x), y: Math.round(it.y), points: it.points })),
+            boss: this.boss ? { x: Math.round(this.boss.x), y: Math.round(this.boss.y), isChargingBurst: this.boss.isChargingBurst, burstVisual: this.boss.burstVisual } : null,
+          });
+        }
       }
     }
 

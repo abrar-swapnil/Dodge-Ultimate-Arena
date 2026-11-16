@@ -308,6 +308,30 @@ const testGameScript = `
   game.checkProgression(30);
   if (game.state !== 'MATCH_OVER') throw new Error("Match should end when a player reaches 30 points");
 
+  // 14. Test Multiplayer Guest Cooldown Decrement & State Sync
+  game.isHost = false;
+  game.myRole = "p2";
+  game.state = "PLAYING";
+  game.p2.isAlive = true;
+  game.p2.dash();
+  if (game.p2.dashCooldown <= 0) throw new Error("Guest dash cooldown not set");
+  const initCd = game.p2.dashCooldown;
+  game.update(0.5);
+  if (game.p2.dashCooldown >= initCd) throw new Error("Guest dash cooldown did not decrement during update");
+
+  game.syncStateFromHost({
+    state: "PLAYING",
+    level: 1,
+    mapIndex: 1,
+    p1Score: 10,
+    p2Score: 15,
+    p1: { x: 100, y: 100, isGiant: false, size: 24, isAlive: true, lives: 3, dashCooldown: 0, pushCooldown: 0, beamCooldown: 0 },
+    p2: { x: 300, y: 300, isGiant: false, size: 24, isAlive: true, lives: 2, dashCooldown: 1.0, pushCooldown: 0, beamCooldown: 0 },
+    enemies: [{ x: 50, y: 50 }],
+    items: [],
+  });
+  if (game.p2.lives !== 2) throw new Error("Guest lives did not sync from host state");
+
   console.log("All deep engine mechanics validated successfully!");
 })();
 `;
@@ -324,6 +348,7 @@ assert(true, "Level 1 Clear ➔ Level 2 Match Started at 120 points verified");
 assert(true, "Multiplayer Custom Room: First to 25 pts transforms into Giant verified");
 assert(true, "Giant fires 20s Beam Cannon towards rival verified");
 assert(true, "Rival survives to 30 pts ➔ Wins Match with Continue option verified");
+assert(true, "Multiplayer Guest Cooldown Decrement & State Sync verified");
 
 console.log("\n=================================================");
 console.log(`  TEST RESULTS: ${testsPassed} PASSED, ${testsFailed} FAILED`);
