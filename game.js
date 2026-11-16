@@ -1161,18 +1161,21 @@
     setupDOM() {
       // 0. Opening Splash Screen Trigger
       const splashScreen = document.getElementById("splash-screen");
-      const enterMenuFromSplash = () => {
+      let splashEntered = false; // prevent double-fire from pointerdown+click on mobile
+      const enterMenuFromSplash = (e) => {
         if (!splashScreen || splashScreen.classList.contains("hidden")) return;
+        if (splashEntered) return;
+        splashEntered = true;
+        if (e && e.cancelable) e.preventDefault(); // stop click firing after pointerdown
         this.sounds._init();
         this.sounds.playCollect();
         splashScreen.classList.add("hidden");
         this.showMenu();
       };
-      splashScreen?.addEventListener("click", enterMenuFromSplash);
-      splashScreen?.addEventListener("pointerdown", enterMenuFromSplash);
+      splashScreen?.addEventListener("pointerdown", enterMenuFromSplash, { passive: false });
       window.addEventListener("keydown", (e) => {
         if (e.code === "Enter" || e.code === "Space") {
-          enterMenuFromSplash();
+          enterMenuFromSplash(e);
         }
       });
 
@@ -2015,16 +2018,24 @@
         if (msgEl) msgEl.innerText = "";
       });
 
-      // 1. Instant Local Profile Activation (0ms latency - user is instantly logged in)
+      // 1. Instant Profile Bar Update (0ms latency — NO modal open, just show name in bar)
       try {
         const savedCreds = this._getStoredCreds();
         const savedProfile = JSON.parse(localStorage.getItem("dodgearena_gamer_profile") || "null");
-        if (savedCreds && savedProfile && savedProfile.username && savedProfile.username.toLowerCase() === savedCreds.username.toLowerCase()) {
-          this.onLoginSuccess(savedProfile);
+        if (savedCreds && savedProfile && savedProfile.username &&
+            savedProfile.username.toLowerCase() === savedCreds.username.toLowerCase()) {
+          // Set profile data instantly — but do NOT open account modal
+          this.gamerProfile = { ...savedProfile, offline: false };
+          // Update profile bar display only (not the modal)
+          this._updateProfileBar();
+          // Pre-fill logged-in view in account modal (hidden), so it's ready when user opens it
+          document.getElementById("account-logged-out-view")?.classList.add("hidden");
+          document.getElementById("account-logged-in-view")?.classList.remove("hidden");
+          this._updateLoggedInUI();
         }
       } catch (e) {}
 
-      // 2. Background Cloud Sync & Verification
+      // 2. Background Cloud Sync & Verification (silent — no UI interruption)
       const savedCreds = this._getStoredCreds();
       if (savedCreds) {
         this._doAuth("login", savedCreds.username, savedCreds.pin, serverUrl, true /* silent */);
@@ -2193,9 +2204,9 @@
           const cachedPin = (cachedUser && cachedUser.pin) || (savedCreds && savedCreds.pin);
 
           if (cachedUser && cachedPin && cachedPin.toString().trim() === pin.toString().trim() && cachedUser.username.toLowerCase() === lowerName) {
-            matchedCachedProfile = cachedUser;
+            matchedCachedProfile = { ...cachedUser, offline: false }; // clear stale offline flag
             if (!this.gamerProfile) {
-              this.onLoginSuccess(cachedUser);
+              this.onLoginSuccess(matchedCachedProfile);
             }
             if (!silent && msgEl && attempt === 1) {
               msgEl.style.color = "#00e5ff";
