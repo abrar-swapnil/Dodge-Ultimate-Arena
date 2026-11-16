@@ -558,6 +558,102 @@ html, body {
   gap: 8px;
 }
 
+/* Character Customizer Styles */
+.character-custom-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  background: rgba(15, 23, 42, 0.6);
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(70, 130, 255, 0.25);
+}
+
+.char-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.char-label-tag {
+  font-size: 0.72rem;
+  font-weight: 800;
+  color: #38bdf8;
+  background: rgba(56, 189, 248, 0.15);
+  border: 1px solid rgba(56, 189, 248, 0.4);
+  padding: 2px 8px;
+  border-radius: 12px;
+}
+
+.char-options-row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.shape-picker {
+  display: flex;
+  gap: 5px;
+  flex: 1;
+  flex-wrap: wrap;
+}
+
+.shape-btn {
+  background: rgba(25, 25, 55, 0.8);
+  border: 1px solid rgba(70, 130, 255, 0.3);
+  color: #c7d2fe;
+  padding: 6px 9px;
+  border-radius: 6px;
+  font-size: 0.73rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.shape-btn:hover {
+  border-color: #38bdf8;
+  background: rgba(56, 189, 248, 0.2);
+}
+
+.shape-btn.active {
+  background: linear-gradient(135deg, #0284c7, #0369a1);
+  border-color: #38bdf8;
+  color: #ffffff;
+  box-shadow: 0 0 10px rgba(56, 189, 248, 0.5);
+}
+
+.custom-photo-uploader {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.photo-upload-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: linear-gradient(135deg, #8b5cf6, #6d28d9);
+  border: 1px solid #a78bfa;
+  color: #ffffff;
+  font-size: 0.74rem;
+  font-weight: 800;
+  padding: 6px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.photo-upload-label:hover {
+  filter: brightness(1.15);
+  box-shadow: 0 0 12px rgba(139, 92, 246, 0.6);
+}
+
+.photo-upload-label.has-photo {
+  background: linear-gradient(135deg, #059669, #047857);
+  border-color: #34d399;
+}
+
 .section-label {
   font-size: 0.78rem;
   font-weight: 700;

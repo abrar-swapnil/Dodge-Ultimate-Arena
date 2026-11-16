@@ -67,8 +67,8 @@
     constructor() {
       this.ctx = null;
       this.muted = false;
-      this.customFailSound = new Audio("gameover.mp3");
-      this.customFailSound.preload = "auto";
+      this.customFailSound = (typeof Audio !== "undefined") ? new Audio("gameover.mp3") : null;
+      if (this.customFailSound) this.customFailSound.preload = "auto";
     }
 
     _init() {
@@ -296,6 +296,11 @@
       this.shockwaveVisual = null;
       this.trails = [];
       this.isAlive = true;
+
+      // Custom Shape and Photo Avatar
+      this.customShape = "square"; // 'square', 'circle', 'triangle', 'diamond', 'star'
+      this.avatarImg = null; // HTMLImageElement
+      this.avatarDataUrl = null;
     }
 
     reset(x, y) {
@@ -537,14 +542,83 @@
         ctx.restore();
       }
 
-      // Player Rect
+      // Player Body (Photo Avatar OR Custom Shape)
       ctx.save();
       if (!IS_MOBILE) {
         ctx.shadowColor = this.isGiant ? "#ffcc00" : this.color;
         ctx.shadowBlur = this.isGiant ? 24 : (this.dashTimer > 0 ? 18 : 10);
       }
-      ctx.fillStyle = this.isGiant ? "#ffaa00" : (this.dashTimer > 0 ? "#ffffff" : this.color);
-      ctx.fillRect(Math.round(this.x), Math.round(this.y), this.size, this.size);
+      const fillColor = this.isGiant ? "#ffaa00" : (this.dashTimer > 0 ? "#ffffff" : this.color);
+      const px = Math.round(this.x);
+      const py = Math.round(this.y);
+      const s = this.size;
+      const cx = px + s / 2;
+      const cy = py + s / 2;
+
+      if (this.avatarImg && this.avatarImg.complete && this.avatarImg.naturalWidth > 0) {
+        // Draw Custom Photo cropped circular and balanced
+        ctx.save();
+        ctx.beginPath();
+        ctx.arc(cx, cy, s / 2, 0, Math.PI * 2);
+        ctx.clip();
+        ctx.drawImage(this.avatarImg, px, py, s, s);
+        ctx.restore();
+
+        // Outer glow border around photo
+        ctx.strokeStyle = fillColor;
+        ctx.lineWidth = 2.5;
+        ctx.beginPath();
+        ctx.arc(cx, cy, s / 2, 0, Math.PI * 2);
+        ctx.stroke();
+      } else {
+        ctx.fillStyle = fillColor;
+        // Render selected geometry shape
+        const shape = this.customShape || "square";
+
+        if (shape === "circle") {
+          ctx.beginPath();
+          ctx.arc(cx, cy, s / 2, 0, Math.PI * 2);
+          ctx.fill();
+        } else if (shape === "triangle") {
+          ctx.beginPath();
+          ctx.moveTo(cx, py);
+          ctx.lineTo(px + s, py + s);
+          ctx.lineTo(px, py + s);
+          ctx.closePath();
+          ctx.fill();
+        } else if (shape === "diamond") {
+          ctx.beginPath();
+          ctx.moveTo(cx, py);
+          ctx.lineTo(px + s, cy);
+          ctx.lineTo(cx, py + s);
+          ctx.lineTo(px, cy);
+          ctx.closePath();
+          ctx.fill();
+        } else if (shape === "star") {
+          ctx.beginPath();
+          const spikes = 5;
+          const outerRadius = s / 2;
+          const innerRadius = s / 4;
+          let rot = Math.PI / 2 * 3;
+          let step = Math.PI / spikes;
+          ctx.moveTo(cx, cy - outerRadius);
+          for (let i = 0; i < spikes; i++) {
+            let x = cx + Math.cos(rot) * outerRadius;
+            let y = cy + Math.sin(rot) * outerRadius;
+            ctx.lineTo(x, y);
+            rot += step;
+            x = cx + Math.cos(rot) * innerRadius;
+            y = cy + Math.sin(rot) * innerRadius;
+            ctx.lineTo(x, y);
+            rot += step;
+          }
+          ctx.closePath();
+          ctx.fill();
+        } else {
+          // Default: square
+          ctx.fillRect(px, py, s, s);
+        }
+      }
 
       // Emergency Dodge Aura
       if (this.emerDodgeTimer > 0) {
@@ -970,6 +1044,34 @@
       document.getElementById("btn-save-hud")?.addEventListener("click", () => this.saveHudLayout());
       document.getElementById("btn-reset-hud")?.addEventListener("click", () => this.resetHudLayout());
       document.getElementById("btn-close-hud")?.addEventListener("click", () => this.closeHudEditor());
+
+      // Character Shape Selection
+      document.querySelectorAll(".shape-btn").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          document.querySelectorAll(".shape-btn").forEach((b) => b.classList.remove("active"));
+          btn.classList.add("active");
+          const shape = btn.getAttribute("data-shape") || "square";
+          this.setPlayerShape(shape);
+        });
+      });
+
+      // Character Photo Uploader
+      const photoInput = document.getElementById("char-photo-input");
+      photoInput?.addEventListener("change", (e) => {
+        const file = e.target.files?.[0];
+        if (file) {
+          const reader = new FileReader();
+          reader.onload = (event) => {
+            const dataUrl = event.target?.result;
+            if (dataUrl) this.setPlayerPhoto(dataUrl);
+          };
+          reader.readAsDataURL(file);
+        }
+      });
+
+      document.getElementById("btn-remove-photo")?.addEventListener("click", () => {
+        this.removePlayerPhoto();
+      });
 
       // Mode Start Buttons
       document.getElementById("btn-mode-solo")?.addEventListener("click", () => {
@@ -1415,6 +1517,15 @@
 
     // --- Custom HUD Layout & Cloud Persistence ---
     initUserAndLoadHUD() {
+      // Load saved character customization
+      const savedShape = localStorage.getItem("dodgearena_char_shape") || "square";
+      const savedPhoto = localStorage.getItem("dodgearena_char_photo");
+      if (savedPhoto) {
+        this.setPlayerPhoto(savedPhoto, false);
+      } else {
+        this.setPlayerShape(savedShape, false);
+      }
+
       // Generate or retrieve persistent User ID
       let uid = localStorage.getItem("dodgearena_user_id");
       if (!uid) {
@@ -1431,17 +1542,21 @@
         } catch (e) {}
       }
 
-      // 2. Fetch from Cloud Server in background if deployed
-      const serverUrl = IS_PROD ? "https://dodge-ultimate-arena.onrender.com" : "http://localhost:9000";
-      fetch(`${serverUrl}/api/hud-layout/${this.userId}`)
-        .then(res => res.json())
-        .then(data => {
-          if (data && data.success && data.layout) {
-            this.applyHudLayout(data.layout);
-            localStorage.setItem("dodgearena_hud_layout", JSON.stringify(data.layout));
-          }
-        })
-        .catch(() => {});
+      // 2. Fetch from Cloud Server in background if in browser
+      if (typeof window !== "undefined" && window.location) {
+        const serverUrl = IS_PROD ? "https://dodge-ultimate-arena.onrender.com" : "http://localhost:9000";
+        try {
+          fetch(`${serverUrl}/api/hud-layout/${this.userId}`)
+            .then(res => res.json())
+            .then(data => {
+              if (data && data.success && data.layout) {
+                this.applyHudLayout(data.layout);
+                localStorage.setItem("dodgearena_hud_layout", JSON.stringify(data.layout));
+              }
+            })
+            .catch(() => {});
+        } catch (err) {}
+      }
     }
 
     openHudEditor() {
@@ -1612,6 +1727,75 @@
       }
     }
 
+    // --- Character Shape & Avatar Customization Methods ---
+    setPlayerShape(shape, persist = true) {
+      this.p1.customShape = shape;
+      this.p1.avatarImg = null;
+      this.p1.avatarDataUrl = null;
+
+      if (persist) {
+        localStorage.setItem("dodgearena_char_shape", shape);
+        localStorage.removeItem("dodgearena_char_photo");
+      }
+
+      // UI Update
+      document.querySelectorAll(".shape-btn").forEach((b) => {
+        if (b.getAttribute("data-shape") === shape) b.classList.add("active");
+        else b.classList.remove("active");
+      });
+
+      const label = document.getElementById("char-active-preview-label");
+      if (label) label.innerText = shape.toUpperCase();
+
+      const uploadBtn = document.getElementById("photo-upload-btn");
+      if (uploadBtn) uploadBtn.classList.remove("has-photo");
+      const rmBtn = document.getElementById("btn-remove-photo");
+      if (rmBtn) rmBtn.classList.add("hidden");
+
+      // Broadcast to rival in multiplayer
+      if (this.conn && this.conn.open) {
+        this.conn.send({ type: "AVATAR_UPDATE", shape, photo: null });
+      }
+    }
+
+    setPlayerPhoto(dataUrl, persist = true) {
+      const img = new Image();
+      img.onload = () => {
+        this.p1.avatarImg = img;
+        this.p1.avatarDataUrl = dataUrl;
+
+        if (persist) {
+          localStorage.setItem("dodgearena_char_photo", dataUrl);
+        }
+
+        // UI Update
+        document.querySelectorAll(".shape-btn").forEach((b) => b.classList.remove("active"));
+        const label = document.getElementById("char-active-preview-label");
+        if (label) label.innerText = "CUSTOM PHOTO";
+
+        const uploadBtn = document.getElementById("photo-upload-btn");
+        if (uploadBtn) uploadBtn.classList.add("has-photo");
+        const uploadText = document.getElementById("photo-upload-text");
+        if (uploadText) uploadText.innerText = "Photo Active";
+        const rmBtn = document.getElementById("btn-remove-photo");
+        if (rmBtn) rmBtn.classList.remove("hidden");
+
+        // Broadcast to rival in multiplayer (resized thumbnail)
+        if (this.conn && this.conn.open) {
+          this.conn.send({ type: "AVATAR_UPDATE", shape: null, photo: dataUrl });
+        }
+      };
+      img.src = dataUrl;
+    }
+
+    removePlayerPhoto() {
+      localStorage.removeItem("dodgearena_char_photo");
+      const savedShape = localStorage.getItem("dodgearena_char_shape") || "square";
+      this.setPlayerShape(savedShape);
+      const uploadText = document.getElementById("photo-upload-text");
+      if (uploadText) uploadText.innerText = "Upload Photo";
+    }
+
     // --- WebRTC Multiplayer ---
     hostCustomRoom() {
       const statusBox = document.getElementById("room-code-display");
@@ -1704,12 +1888,38 @@
             this.p2.startSprint();
           } else if (data.type === "STOP_SPRINT") {
             this.p2.stopSprint();
+          } else if (data.type === "AVATAR_UPDATE") {
+            if (data.photo) {
+              const img = new Image();
+              img.onload = () => { this.p2.avatarImg = img; };
+              img.src = data.photo;
+            } else {
+              this.p2.customShape = data.shape || "square";
+              this.p2.avatarImg = null;
+            }
           }
         } else {
           if (data.type === "STATE") {
             this.syncStateFromHost(data);
+          } else if (data.type === "AVATAR_UPDATE") {
+            if (data.photo) {
+              const img = new Image();
+              img.onload = () => { this.p1.avatarImg = img; };
+              img.src = data.photo;
+            } else {
+              this.p1.customShape = data.shape || "square";
+              this.p1.avatarImg = null;
+            }
           }
         }
+      });
+
+      // Send local avatar on connection start
+      const myPlayer = this.isHost ? this.p1 : this.p2;
+      this.conn.send({
+        type: "AVATAR_UPDATE",
+        shape: myPlayer.customShape,
+        photo: myPlayer.avatarDataUrl,
       });
     }
 

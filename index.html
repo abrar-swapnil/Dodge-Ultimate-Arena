@@ -138,6 +138,31 @@
           </div>
         </div>
 
+        <!-- Character Avatar & Shape Customizer -->
+        <div class="character-custom-section">
+          <div class="char-header">
+            <label class="section-label">Choose Character / Avatar:</label>
+            <span id="char-active-preview-label" class="char-label-tag">Cube</span>
+          </div>
+          <div class="char-options-row">
+            <div class="shape-picker">
+              <button class="shape-btn active" data-shape="square" title="Neon Square">🟦 Square</button>
+              <button class="shape-btn" data-shape="circle" title="Energy Sphere">🟢 Circle</button>
+              <button class="shape-btn" data-shape="triangle" title="Space Arrow">🔺 Ship</button>
+              <button class="shape-btn" data-shape="diamond" title="Crystal Diamond">💎 Gem</button>
+              <button class="shape-btn" data-shape="star" title="Cosmic Star">⭐ Star</button>
+            </div>
+            <div class="custom-photo-uploader">
+              <label for="char-photo-input" class="photo-upload-label" id="photo-upload-btn">
+                <span id="photo-preview-icon">📷</span>
+                <span id="photo-upload-text">Upload Photo</span>
+              </label>
+              <input type="file" id="char-photo-input" accept="image/*" class="hidden">
+              <button id="btn-remove-photo" class="text-btn hidden" title="Remove custom photo">✖ Reset</button>
+            </div>
+          </div>
+        </div>
+
         <div class="mode-cards">
           <button id="btn-mode-solo" class="mode-card highlight">
             <div class="mode-icon">🎯</div>

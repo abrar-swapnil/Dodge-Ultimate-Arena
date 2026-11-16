@@ -97,6 +97,12 @@ global.localStorage = {
 };
 global.performance = { now: () => Date.now() };
 global.requestAnimationFrame = () => {};
+global.fetch = () => Promise.resolve({ json: () => Promise.resolve({ success: true }) });
+global.Audio = class {
+  constructor() { this.currentTime = 0; }
+  play() { return Promise.resolve(); }
+  pause() {}
+};
 
 // Mock AudioContext
 global.AudioContext = class {
