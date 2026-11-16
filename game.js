@@ -2254,30 +2254,30 @@
               JSON.stringify({ username, pin })
             );
 
-            if (silent && this.gamerProfile) {
-              // Silent background sync: merge server data with local — take the BEST of each stat
-              // so a device with higher score doesn't get downgraded by another device's stale server data
-              const srv = data.profile.stats || {};
-              const loc = this.gamerProfile.stats || {};
-              const mergedStats = {
-                highScore:      Math.max(srv.highScore      || 0, loc.highScore      || 0),
-                mpWins:         Math.max(srv.mpWins         || 0, loc.mpWins         || 0),
-                mpLosses:       Math.max(srv.mpLosses       || 0, loc.mpLosses       || 0),
-                bossesDefeated: Math.max(srv.bossesDefeated || 0, loc.bossesDefeated || 0),
-                totalMatches:   Math.max(srv.totalMatches   || 0, loc.totalMatches   || 0),
-                soloMaxLevel:   Math.max(srv.soloMaxLevel   || 1, loc.soloMaxLevel   || 1),
-                mpMaxLevel:     Math.max(srv.mpMaxLevel     || 1, loc.mpMaxLevel     || 1),
-              };
-              const mergedProfile = { ...data.profile, stats: mergedStats, offline: false };
-              this.onLoginSuccess(mergedProfile);
-              // If local had higher stats, push the merged data back to server
-              const needsUpload = Object.keys(mergedStats).some(k => mergedStats[k] > (srv[k] || (k.includes('Level') ? 1 : 0)));
-              if (needsUpload) {
-                const serverUrl = IS_PROD ? "https://dodge-ultimate-arena.onrender.com" : "http://localhost:9000";
-                this.syncProfileToCloud(serverUrl, true).catch(() => {});
-              }
-            } else {
-              this.onLoginSuccess(data.profile);
+            // Merge server data with local: always take the BEST of each stat and preserve photo
+            const srv = data.profile.stats || {};
+            const loc = (this.gamerProfile && this.gamerProfile.stats) || {};
+            const mergedStats = {
+              highScore:      Math.max(srv.highScore      || 0, loc.highScore      || 0),
+              mpWins:         Math.max(srv.mpWins         || 0, loc.mpWins         || 0),
+              mpLosses:       Math.max(srv.mpLosses       || 0, loc.mpLosses       || 0),
+              bossesDefeated: Math.max(srv.bossesDefeated || 0, loc.bossesDefeated || 0),
+              totalMatches:   Math.max(srv.totalMatches   || 0, loc.totalMatches   || 0),
+              soloMaxLevel:   Math.max(srv.soloMaxLevel   || 1, loc.soloMaxLevel   || 1),
+              mpMaxLevel:     Math.max(srv.mpMaxLevel     || 1, loc.mpMaxLevel     || 1),
+            };
+            const photoVal = data.profile.photo ||
+                             (this.gamerProfile && this.gamerProfile.photo) ||
+                             localStorage.getItem("dodgearena_char_photo") || null;
+            const mergedProfile = { ...data.profile, photo: photoVal, stats: mergedStats, offline: false };
+            this.onLoginSuccess(mergedProfile);
+
+            // If local stats or photo were ahead of server, push merged data to cloud immediately
+            const needsUpload = Object.keys(mergedStats).some(k => mergedStats[k] > (srv[k] || (k.includes('Level') ? 1 : 0))) ||
+                                (!data.profile.photo && photoVal);
+            if (needsUpload) {
+              const serverUrl = IS_PROD ? "https://dodge-ultimate-arena.onrender.com" : "http://localhost:9000";
+              this.syncProfileToCloud(serverUrl, true).catch(() => {});
             }
 
             const suggestionsBox = document.getElementById("username-suggestions");
@@ -2375,6 +2375,7 @@
 
       // Apply saved avatar
       if (profile.photo) {
+        localStorage.setItem("dodgearena_char_photo", profile.photo);
         this.setPlayerPhoto(profile.photo, false);
       } else if (profile.shape) {
         this.setPlayerShape(profile.shape, false);
@@ -2523,14 +2524,21 @@
       if (!quiet && syncEl) { syncEl.style.color = "#aaa"; syncEl.innerText = "⏳ Syncing..."; }
 
       const myPlayer = (this.mode === "CUSTOM_ROOM" && this.myRole === "p2") ? this.p2 : this.p1;
+      const photoToSend = (this.gamerProfile && this.gamerProfile.photo) ||
+                          (myPlayer && myPlayer.avatarDataUrl) ||
+                          localStorage.getItem("dodgearena_char_photo") || null;
+      const shapeToSend = myPlayer.customShape ||
+                          (this.gamerProfile && this.gamerProfile.shape) ||
+                          localStorage.getItem("dodgearena_char_shape") || "square";
+
       return fetch(`${serverUrl}/api/profile/save`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           username: creds.username,
           pin: creds.pin,
-          shape: myPlayer.customShape || localStorage.getItem("dodgearena_char_shape"),
-          photo: myPlayer.avatarDataUrl || null,
+          shape: shapeToSend,
+          photo: photoToSend,
           hudLayout: (() => {
             try { return JSON.parse(localStorage.getItem("dodgearena_hud_layout") || "null"); } catch (e) { return null; }
           })(),
@@ -2784,6 +2792,10 @@
             localStorage.setItem("dodgearena_gamer_profile", JSON.stringify(this.gamerProfile));
             this._updateProfileBar();
             this._updateLoggedInUI();
+            const serverUrl = IS_PROD
+              ? "https://dodge-ultimate-arena.onrender.com"
+              : "http://localhost:9000";
+            this.syncProfileToCloud(serverUrl, true).catch(() => {});
           }
         }
 
@@ -2814,6 +2826,23 @@
         localStorage.setItem("dodgearena_gamer_profile", JSON.stringify(this.gamerProfile));
         this._updateProfileBar();
         this._updateLoggedInUI();
+        const serverUrl = IS_PROD
+          ? "https://dodge-ultimate-arena.onrender.com"
+          : "http://localhost:9000";
+        const creds = this._getStoredCreds();
+        if (creds) {
+          fetch(`${serverUrl}/api/profile/save`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              username: creds.username,
+              pin: creds.pin,
+              removePhoto: true,
+              photo: null,
+              stats: this.gamerProfile.stats || {},
+            }),
+          }).catch(() => {});
+        }
       }
       const savedShape = localStorage.getItem("dodgearena_char_shape") || "square";
       this.setPlayerShape(savedShape);
@@ -3663,6 +3692,10 @@
         this.hasPausedMatch = false;
         document.getElementById("btn-resume-active-match")?.classList.add("hidden");
         this.floatingTexts.push(new FloatingText(player.x, player.y, "💀 ELIMINATED!", "#ff0000"));
+        if (this.mode === "SOLO") {
+          this.updateHighScore(this.p1Score);
+          this.incrementStat("totalMatches");
+        }
         if (this.mode === "CUSTOM_ROOM" && this.isHost) {
           this.broadcastState();
         }

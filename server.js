@@ -253,6 +253,27 @@ app.post("/api/auth/login", (req, res) => {
     });
   }
 
+  // Cross-device sync: if client provided a local backup, merge stats (take max) and save photo if server lacks one
+  if (clientBackup && clientBackup.username && clientBackup.pin) {
+    const backupPin = clientBackup.pin.toString().trim();
+    if (backupPin === cleanPin && clientBackup.username.toLowerCase() === key) {
+      if (clientBackup.photo && !user.photo) {
+        user.photo = clientBackup.photo;
+      }
+      if (clientBackup.stats) {
+        user.stats = {
+          highScore: Math.max(user.stats?.highScore || 0, clientBackup.stats.highScore || 0),
+          mpWins: Math.max(user.stats?.mpWins || 0, clientBackup.stats.mpWins || 0),
+          mpLosses: Math.max(user.stats?.mpLosses || 0, clientBackup.stats.mpLosses || 0),
+          bossesDefeated: Math.max(user.stats?.bossesDefeated || 0, clientBackup.stats.bossesDefeated || 0),
+          totalMatches: Math.max(user.stats?.totalMatches || 0, clientBackup.stats.totalMatches || 0),
+          soloMaxLevel: Math.max(user.stats?.soloMaxLevel || 1, clientBackup.stats.soloMaxLevel || 1),
+          mpMaxLevel: Math.max(user.stats?.mpMaxLevel || 1, clientBackup.stats.mpMaxLevel || 1),
+        };
+      }
+    }
+  }
+
   user.lastLoginAt = new Date().toISOString();
   saveProfilesToDisk();
   console.log(`[AUTH] Gamer logged in: ${user.username}`);
@@ -371,7 +392,11 @@ app.post("/api/profile/save", (req, res) => {
   }
 
   if (shape !== undefined) user.shape = shape;
-  if (photo !== undefined) user.photo = photo; // Base64 thumbnail
+  if (photo !== undefined && photo !== null && photo !== "") {
+    user.photo = photo; // Base64 thumbnail
+  } else if (req.body.removePhoto === true) {
+    user.photo = null;
+  }
   if (hudLayout !== undefined) {
     user.hudLayout = hudLayout;
     userHudLayouts[user.username] = { layout: hudLayout, updatedAt: new Date().toISOString() };
