@@ -2289,11 +2289,29 @@
     }
 
     syncStateFromHost(data) {
+      const prevState = this.state;
       this.state = data.state;
       this.level = data.level;
       this.mapIndex = data.mapIndex;
       this.p1Score = data.p1Score;
       this.p2Score = data.p2Score;
+      if (data.winner) this.matchWinner = data.winner;
+
+      // Play victory / game over sound when match finishes
+      if (this.state === "MATCH_OVER" && prevState !== "MATCH_OVER") {
+        const myRole = (this.mode === "CUSTOM_ROOM" && this.myRole === "p2") ? "p2" : "p1";
+        const myScore = (myRole === "p2") ? this.p2Score : this.p1Score;
+        const rivalScore = (myRole === "p2") ? this.p1Score : this.p2Score;
+        const myPlayer = (myRole === "p2") ? this.p2 : this.p1;
+        const rivalPlayer = (myRole === "p2") ? this.p1 : this.p2;
+
+        const isMeWinner = (myScore >= 30) || (!rivalPlayer.isAlive && myPlayer.isAlive) || (data.winner === myRole);
+        if (isMeWinner) {
+          this.sounds.playVictory();
+        } else {
+          this.sounds.playGameOver();
+        }
+      }
 
       // P1 (Host)
       this.p1.x = data.p1.x;
@@ -2374,6 +2392,55 @@
       }
 
       this.updateHUD();
+    }
+
+    broadcastState() {
+      if (this.mode !== "CUSTOM_ROOM" || !this.isHost || !this.conn || !this.conn.open) return;
+      this.conn.send({
+        type: "STATE",
+        state: this.state,
+        level: this.level,
+        mapIndex: this.mapIndex,
+        p1Score: this.p1Score,
+        p2Score: this.p2Score,
+        winner: (this.p1Score >= 30 || (this.state === "MATCH_OVER" && !this.p2.isAlive)) ? "p1" :
+                (this.p2Score >= 30 || (this.state === "MATCH_OVER" && !this.p1.isAlive)) ? "p2" : null,
+        p1: {
+          x: Math.round(this.p1.x),
+          y: Math.round(this.p1.y),
+          isGiant: this.p1.isGiant,
+          size: this.p1.size,
+          activeBeam: this.p1.activeBeam,
+          isAlive: this.p1.isAlive,
+          lives: this.p1.lives,
+          emerDodges: this.p1.emerDodges,
+          dashCooldown: Math.round(this.p1.dashCooldown * 10) / 10,
+          pushCooldown: Math.round(this.p1.pushCooldown * 10) / 10,
+          beamCooldown: Math.round(this.p1.beamCooldown * 10) / 10,
+          sprintCooldown: Math.round(this.p1.sprintCooldown * 10) / 10,
+          invulnerableTimer: Math.round(this.p1.invulnerableTimer * 10) / 10,
+          shockwaveVisual: this.p1.shockwaveVisual,
+        },
+        p2: {
+          x: Math.round(this.p2.x),
+          y: Math.round(this.p2.y),
+          isGiant: this.p2.isGiant,
+          size: this.p2.size,
+          activeBeam: this.p2.activeBeam,
+          isAlive: this.p2.isAlive,
+          lives: this.p2.lives,
+          emerDodges: this.p2.emerDodges,
+          dashCooldown: Math.round(this.p2.dashCooldown * 10) / 10,
+          pushCooldown: Math.round(this.p2.pushCooldown * 10) / 10,
+          beamCooldown: Math.round(this.p2.beamCooldown * 10) / 10,
+          sprintCooldown: Math.round(this.p2.sprintCooldown * 10) / 10,
+          invulnerableTimer: Math.round(this.p2.invulnerableTimer * 10) / 10,
+          shockwaveVisual: this.p2.shockwaveVisual,
+        },
+        enemies: this.enemies.map(e => ({ x: Math.round(e.x), y: Math.round(e.y) })),
+        items: this.items.map(it => ({ x: Math.round(it.x), y: Math.round(it.y), points: it.points })),
+        boss: this.boss ? { x: Math.round(this.boss.x), y: Math.round(this.boss.y), isChargingBurst: this.boss.isChargingBurst, burstVisual: this.boss.burstVisual } : null,
+      });
     }
 
     triggerShockwave(caster) {
@@ -2625,9 +2692,11 @@
         if (this.p1Score >= 30) {
           this.state = "MATCH_OVER";
           this.sounds.playVictory();
+          this.broadcastState();
         } else if (this.p2Score >= 30) {
           this.state = "MATCH_OVER";
           this.sounds.playVictory();
+          this.broadcastState();
         }
       }
     }
@@ -2684,6 +2753,11 @@
       }
 
       if (this.mode === "CUSTOM_ROOM" && !this.isHost) {
+        // Also check if match reached 30 points locally on guest
+        if (this.p1Score >= 30 || this.p2Score >= 30) {
+          this.state = "MATCH_OVER";
+        }
+
         // Run guest local simulation:
         // 1. Client prediction for self so movement is instantaneous & responsive
         const myPlayer = (this.myRole === "p2") ? this.p2 : this.p1;
@@ -2722,6 +2796,15 @@
       for (let i = this.particles.length - 1; i >= 0; i--) {
         this.particles[i].update(dt);
         if (this.particles[i].alpha <= 0) this.particles.splice(i, 1);
+      }
+
+      // Broadcast state to Guest if Host (runs whether playing OR match over!)
+      this.stateBroadcastTimer = (this.stateBroadcastTimer || 0) + dt;
+      if (this.mode === "CUSTOM_ROOM" && this.isHost && this.conn && this.conn.open) {
+        if (this.stateBroadcastTimer >= 0.04) {
+          this.stateBroadcastTimer = 0;
+          this.broadcastState();
+        }
       }
 
       if (this.state !== "PLAYING") return;
@@ -2775,57 +2858,6 @@
 
       this.checkCollisions();
       this.updateHUD();
-
-      // Broadcast state to Guest if Host (throttled to 25Hz to prevent mobile network choking)
-      this.stateBroadcastTimer = (this.stateBroadcastTimer || 0) + dt;
-      if (this.mode === "CUSTOM_ROOM" && this.isHost && this.conn && this.conn.open) {
-        if (this.stateBroadcastTimer >= 0.04) {
-          this.stateBroadcastTimer = 0;
-          this.conn.send({
-            type: "STATE",
-            state: this.state,
-            level: this.level,
-            mapIndex: this.mapIndex,
-            p1Score: this.p1Score,
-            p2Score: this.p2Score,
-            p1: {
-              x: Math.round(this.p1.x),
-              y: Math.round(this.p1.y),
-              isGiant: this.p1.isGiant,
-              size: this.p1.size,
-              activeBeam: this.p1.activeBeam,
-              isAlive: this.p1.isAlive,
-              lives: this.p1.lives,
-              emerDodges: this.p1.emerDodges,
-              dashCooldown: Math.round(this.p1.dashCooldown * 10) / 10,
-              pushCooldown: Math.round(this.p1.pushCooldown * 10) / 10,
-              beamCooldown: Math.round(this.p1.beamCooldown * 10) / 10,
-              sprintCooldown: Math.round(this.p1.sprintCooldown * 10) / 10,
-              invulnerableTimer: Math.round(this.p1.invulnerableTimer * 10) / 10,
-              shockwaveVisual: this.p1.shockwaveVisual,
-            },
-            p2: {
-              x: Math.round(this.p2.x),
-              y: Math.round(this.p2.y),
-              isGiant: this.p2.isGiant,
-              size: this.p2.size,
-              activeBeam: this.p2.activeBeam,
-              isAlive: this.p2.isAlive,
-              lives: this.p2.lives,
-              emerDodges: this.p2.emerDodges,
-              dashCooldown: Math.round(this.p2.dashCooldown * 10) / 10,
-              pushCooldown: Math.round(this.p2.pushCooldown * 10) / 10,
-              beamCooldown: Math.round(this.p2.beamCooldown * 10) / 10,
-              sprintCooldown: Math.round(this.p2.sprintCooldown * 10) / 10,
-              invulnerableTimer: Math.round(this.p2.invulnerableTimer * 10) / 10,
-              shockwaveVisual: this.p2.shockwaveVisual,
-            },
-            enemies: this.enemies.map(e => ({ x: Math.round(e.x), y: Math.round(e.y) })),
-            items: this.items.map(it => ({ x: Math.round(it.x), y: Math.round(it.y), points: it.points })),
-            boss: this.boss ? { x: Math.round(this.boss.x), y: Math.round(this.boss.y), isChargingBurst: this.boss.isChargingBurst, burstVisual: this.boss.burstVisual } : null,
-          });
-        }
-      }
     }
 
     spawnEdgeEnemy() {
@@ -2930,6 +2962,9 @@
         this.sounds.playGameOver();
         this.state = "MATCH_OVER";
         this.floatingTexts.push(new FloatingText(player.x, player.y, "💀 ELIMINATED!", "#ff0000"));
+        if (this.mode === "CUSTOM_ROOM" && this.isHost) {
+          this.broadcastState();
+        }
       }
     }
 
@@ -3144,14 +3179,49 @@
         ctx.font = "bold 26px monospace, sans-serif";
         ctx.fillText(`Final Score: ${this.p1Score} (Level ${this.level} - Map ${this.mapIndex})`, SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2 + 10);
       } else {
-        const winner = this.p1Score >= 30 ? "PLAYER 1" : (this.p2Score >= 30 ? "PLAYER 2" : (this.p1.isAlive ? "PLAYER 1" : "PLAYER 2"));
-        ctx.fillStyle = "#ffcc00";
-        ctx.font = "bold 44px monospace, sans-serif";
-        ctx.fillText(`🏆 ${winner} WINS MATCH!`, SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2 - 40);
+        const myRole = (this.mode === "CUSTOM_ROOM" && this.myRole === "p2") ? "p2" : "p1";
+        const myScore = (myRole === "p2") ? this.p2Score : this.p1Score;
+        const rivalScore = (myRole === "p2") ? this.p1Score : this.p2Score;
+        const myPlayer = (myRole === "p2") ? this.p2 : this.p1;
+        const rivalPlayer = (myRole === "p2") ? this.p1 : this.p2;
+
+        let isMeWinner = false;
+        let isRivalWinner = false;
+
+        if (myScore >= 30) isMeWinner = true;
+        else if (rivalScore >= 30) isRivalWinner = true;
+        else if (!rivalPlayer.isAlive && myPlayer.isAlive) isMeWinner = true;
+        else if (!myPlayer.isAlive && rivalPlayer.isAlive) isRivalWinner = true;
+        else if (this.matchWinner) {
+          isMeWinner = (this.matchWinner === myRole);
+          isRivalWinner = !isMeWinner;
+        }
+
+        if (isMeWinner) {
+          ctx.fillStyle = "#ffcc00";
+          ctx.font = "bold 44px monospace, sans-serif";
+          ctx.fillText("👑 YOU WON THE MATCH!", SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2 - 45);
+
+          ctx.fillStyle = "#00ff88";
+          ctx.font = "bold 24px monospace, sans-serif";
+          ctx.fillText("🏆 VICTORY! ARENA CHAMPION!", SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2 - 5);
+        } else if (isRivalWinner) {
+          ctx.fillStyle = "#ff4455";
+          ctx.font = "bold 44px monospace, sans-serif";
+          ctx.fillText("💀 YOU WERE DEFEATED!", SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2 - 45);
+
+          ctx.fillStyle = "#ffaa00";
+          ctx.font = "bold 24px monospace, sans-serif";
+          ctx.fillText(`${rivalPlayer.name || "OPPONENT"} WINS THE MATCH!`, SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2 - 5);
+        } else {
+          ctx.fillStyle = "#ffcc00";
+          ctx.font = "bold 44px monospace, sans-serif";
+          ctx.fillText("🏆 MATCH FINISHED!", SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2 - 45);
+        }
 
         ctx.fillStyle = "#ffffff";
-        ctx.font = "bold 22px monospace, sans-serif";
-        ctx.fillText(`Scores: P1 [${this.p1Score}] - [${this.p2Score}] P2`, SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2 + 10);
+        ctx.font = "bold 20px monospace, sans-serif";
+        ctx.fillText(`YOU: [${myScore} pts]   vs   OPPONENT: [${rivalScore} pts]`, SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2 + 35);
       }
 
       const blink = Math.floor(this.gameTime * 2.5) % 2 === 0;
