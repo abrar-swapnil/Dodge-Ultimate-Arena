@@ -1190,36 +1190,53 @@
           targetEmail: "swapnil172294@gmail.com",
         };
 
-        // 1. Send to Formspree direct to swapnil172294@gmail.com
-        const formspreePromise = fetch("https://formspree.io/f/xvgzlowy", {
-          method: "POST",
-          headers: { "Content-Type": "application/json", "Accept": "application/json" },
-          body: JSON.stringify(payload),
-        }).catch(() => {});
+        // Send via EmailJS → swapnil172294@gmail.com
+        const emailParams = {
+          name: payload.name,
+          email: payload.email || "Not provided",
+          title: payload.type,
+          message: payload.message,
+          time: new Date().toLocaleString("en-BD", { timeZone: "Asia/Dhaka" }),
+        };
 
-        // 2. Backup send to Render Backend Server (/api/feedback)
+        const emailjsPromise = (typeof emailjs !== "undefined")
+          ? emailjs.send("service_st1ild6", "template_7vi3rr4", emailParams)
+          : Promise.reject("emailjs not loaded");
+
+        // Backup: Render Server store (no email, just log)
         const serverUrl = IS_PROD ? "https://dodge-ultimate-arena.onrender.com" : "http://localhost:9000";
-        const renderPromise = fetch(`${serverUrl}/api/feedback`, {
+        fetch(`${serverUrl}/api/feedback`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(payload),
         }).catch(() => {});
 
-        Promise.allSettled([formspreePromise, renderPromise]).then(() => {
-          if (submitBtn) {
-            submitBtn.disabled = false;
-            submitBtn.innerText = "🚀 SEND FEEDBACK";
-          }
-          if (statusMsg) {
-            statusMsg.style.color = "#10b981";
-            statusMsg.innerText = "✅ Thank you! Your feedback has been sent to Abrar Swapnil!";
-          }
-          setTimeout(() => {
-            feedbackForm.reset();
-            document.getElementById("feedback-modal-overlay")?.classList.add("hidden");
-            if (statusMsg) statusMsg.innerText = "";
-          }, 1800);
-        });
+        emailjsPromise
+          .then(() => {
+            if (submitBtn) {
+              submitBtn.disabled = false;
+              submitBtn.innerText = "🚀 SEND FEEDBACK";
+            }
+            if (statusMsg) {
+              statusMsg.style.color = "#10b981";
+              statusMsg.innerText = "✅ Thank you! Your feedback has been sent to Abrar Swapnil!";
+            }
+            setTimeout(() => {
+              feedbackForm.reset();
+              document.getElementById("feedback-modal-overlay")?.classList.add("hidden");
+              if (statusMsg) statusMsg.innerText = "";
+            }, 1800);
+          })
+          .catch(() => {
+            if (submitBtn) {
+              submitBtn.disabled = false;
+              submitBtn.innerText = "🚀 SEND FEEDBACK";
+            }
+            if (statusMsg) {
+              statusMsg.style.color = "#ef4444";
+              statusMsg.innerText = "❌ Failed to send. Please try again!";
+            }
+          });
       });
 
       // Rules Translate in Bangla / English toggle
