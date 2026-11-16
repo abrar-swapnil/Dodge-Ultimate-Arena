@@ -834,6 +834,7 @@
       this.speed = speed;
       this.knockbackVx = 0;
       this.knockbackVy = 0;
+      this.stunTimer = 0; // stunned when hitting player or pushed
     }
 
     get rect() {
@@ -848,8 +849,18 @@
     update(targetRect, dt) {
       this.x += this.knockbackVx * dt;
       this.y += this.knockbackVy * dt;
-      this.knockbackVx *= Math.max(0, 1 - 6 * dt);
-      this.knockbackVy *= Math.max(0, 1 - 6 * dt);
+      this.knockbackVx *= Math.max(0, 1 - 5 * dt);
+      this.knockbackVy *= Math.max(0, 1 - 5 * dt);
+
+      // Keep within arena bounds
+      this.x = Math.max(10, Math.min(SCREEN_WIDTH - this.size - 10, this.x));
+      this.y = Math.max(10, Math.min(SCREEN_HEIGHT - this.size - 10, this.y));
+
+      // If stunned, cannot steer towards player
+      if (this.stunTimer > 0) {
+        this.stunTimer -= dt;
+        return;
+      }
 
       if (!targetRect) return;
 
@@ -2444,29 +2455,43 @@
       player.lives = Math.max(0, player.lives - 1);
       this.updateHUD();
 
-      // Repel all nearby enemies away from player so they can never sticky-hit!
+      // Displace & Stun all nearby enemies away from player so they can never sticky-hit!
       const pcx = player.x + player.size / 2;
       const pcy = player.y + player.size / 2;
       for (let i = 0; i < this.enemies.length; i++) {
         const e = this.enemies[i];
         const ecx = e.x + e.size / 2;
         const ecy = e.y + e.size / 2;
-        const dx = ecx - pcx;
-        const dy = ecy - pcy;
-        const dist = Math.hypot(dx, dy);
-        if (dist < 220) {
-          const force = (1 - dist / 220) * 550 + 200;
-          const nx = dist > 0 ? dx / dist : (Math.random() - 0.5);
-          const ny = dist > 0 ? dy / dist : (Math.random() - 0.5);
-          e.knockbackVx = nx * force;
-          e.knockbackVy = ny * force;
+        let dx = ecx - pcx;
+        let dy = ecy - pcy;
+        let dist = Math.hypot(dx, dy);
+
+        if (dist < 260) {
+          // If perfectly overlapping or too close, randomize push angle
+          if (dist < 15) {
+            const angle = Math.random() * Math.PI * 2;
+            dx = Math.cos(angle);
+            dy = Math.sin(angle);
+            dist = 1;
+          }
+          const nx = dx / dist;
+          const ny = dy / dist;
+
+          // Push enemy position directly to a safe radius
+          e.x = Math.max(20, Math.min(SCREEN_WIDTH - e.size - 20, pcx + nx * 220));
+          e.y = Math.max(20, Math.min(SCREEN_HEIGHT - e.size - 20, pcy + ny * 220));
+
+          // Apply high knockback & stun for 1.8s
+          e.knockbackVx = nx * 350;
+          e.knockbackVy = ny * 350;
+          e.stunTimer = 1.8;
         }
       }
 
       if (player.lives > 0) {
-        // Player still has lives left! Give 2.5s safe iframe and speed buff to escape
-        player.invulnerableTimer = 2.5; // 2.5s invulnerability blink
-        player.speedBuffTimer = 1.8;   // 1.8s speed boost to safely run away
+        // Player still has lives left! Give 3.0s safe iframe and speed buff to escape
+        player.invulnerableTimer = 3.0; // 3.0s invulnerability blink
+        player.speedBuffTimer = 2.0;   // 2.0s speed boost to safely run away
         this.sounds.playWarning();
 
         const msg = player.lives === 2 ? "❤️ 2 LIVES LEFT! ESCAPE!" : "⚠️ LAST LIFE! RUN!";
