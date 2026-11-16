@@ -24,6 +24,9 @@
         <span id="diff-badge" class="badge diff-normal">NORMAL</span>
       </div>
       <div class="top-buttons">
+        <button id="pause-btn" class="icon-btn" aria-label="Pause Game">
+          ⏸️ <span>Pause</span>
+        </button>
         <button id="menu-btn" class="icon-btn" aria-label="Game Menu">
           ☰ <span>Menu</span>
         </button>
@@ -194,6 +197,24 @@
           <strong>👑 Multiplayer Giant:</strong> Reach 25 pts to become Giant & shoot 20s Beam ('E' / Button). Rival must survive to 30 pts to win!
         </div>
       </div>
+    </div>
+
+    <!-- Pause Modal Overlay -->
+    <div id="pause-overlay" class="modal-backdrop hidden">
+      <div class="menu-modal pause-modal">
+        <h2 class="game-logo" style="font-size: 1.8rem;">GAME PAUSED</h2>
+        <p class="tagline">Take a breath. Ready to dodge again?</p>
+        <div class="pause-actions">
+          <button id="btn-resume-game" class="btn primary-btn large-btn">▶ RESUME GAME</button>
+          <button id="btn-restart-game" class="btn secondary-btn">🔄 RESTART MATCH</button>
+          <button id="btn-pause-menu" class="btn small-btn">🏠 MAIN MENU</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Resume 3-Second Countdown Overlay -->
+    <div id="countdown-overlay" class="countdown-backdrop hidden">
+      <div id="countdown-number" class="countdown-pop">3</div>
     </div>
   </div>
 

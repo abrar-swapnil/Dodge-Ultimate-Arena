@@ -924,6 +924,7 @@
     // --- DOM Setup ---
     setupDOM() {
       // Menu and Top Bar
+      document.getElementById("pause-btn")?.addEventListener("click", () => this.togglePause());
       document.getElementById("menu-btn")?.addEventListener("click", () => this.showMenu());
       document.getElementById("sound-btn")?.addEventListener("click", () => {
         this.sounds._init();
@@ -934,6 +935,17 @@
       document.getElementById("fullscreen-btn")?.addEventListener("click", () => {
         if (!document.fullscreenElement) document.documentElement.requestFullscreen().catch(() => {});
         else document.exitFullscreen().catch(() => {});
+      });
+
+      // Pause Modal Buttons
+      document.getElementById("btn-resume-game")?.addEventListener("click", () => this.resumeWithCountdown());
+      document.getElementById("btn-restart-game")?.addEventListener("click", () => {
+        this.hidePause();
+        this.startMatch(this.mode);
+      });
+      document.getElementById("btn-pause-menu")?.addEventListener("click", () => {
+        this.hidePause();
+        this.showMenu();
       });
 
       // Difficulty Buttons
@@ -995,6 +1007,7 @@
     }
 
     showMenu() {
+      this.hidePause();
       this.state = "MENU";
       document.getElementById("modal-overlay")?.classList.remove("hidden");
       document.getElementById("match-banner")?.classList.add("hidden");
@@ -1002,6 +1015,57 @@
 
     hideMenu() {
       document.getElementById("modal-overlay")?.classList.add("hidden");
+    }
+
+    togglePause() {
+      if (this.state === "PLAYING") {
+        this.pauseGame();
+      } else if (this.state === "PAUSED") {
+        this.resumeWithCountdown();
+      }
+    }
+
+    pauseGame() {
+      if (this.state !== "PLAYING") return;
+      this.state = "PAUSED";
+      document.getElementById("pause-overlay")?.classList.remove("hidden");
+    }
+
+    hidePause() {
+      document.getElementById("pause-overlay")?.classList.add("hidden");
+      document.getElementById("countdown-overlay")?.classList.add("hidden");
+    }
+
+    resumeWithCountdown() {
+      document.getElementById("pause-overlay")?.classList.add("hidden");
+      const countdownOverlay = document.getElementById("countdown-overlay");
+      const countdownNum = document.getElementById("countdown-number");
+      if (!countdownOverlay || !countdownNum) {
+        this.state = "PLAYING";
+        return;
+      }
+
+      this.state = "COUNTDOWN";
+      countdownOverlay.classList.remove("hidden");
+
+      let count = 3;
+      countdownNum.innerText = count;
+      this.sounds.playCollect();
+
+      const timerId = setInterval(() => {
+        count--;
+        if (count > 0) {
+          countdownNum.innerText = count;
+          this.sounds.playCollect();
+        } else if (count === 0) {
+          countdownNum.innerText = "GO!";
+          this.sounds.playDash();
+        } else {
+          clearInterval(timerId);
+          countdownOverlay.classList.add("hidden");
+          this.state = "PLAYING";
+        }
+      }, 700);
     }
 
     // --- Input Handlers ---
@@ -1069,6 +1133,12 @@
 
         if (e.code === "Enter") {
           if (this.state === "MATCH_OVER") this.startMatch(this.mode);
+        }
+
+        // P or Escape: Pause / Resume
+        if (e.code === "KeyP" || e.code === "Escape") {
+          e.preventDefault();
+          this.togglePause();
         }
       });
 
