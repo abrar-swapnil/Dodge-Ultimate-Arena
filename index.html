@@ -533,9 +533,17 @@
         <!-- Logged In View -->
         <div id="account-logged-in-view" class="hidden">
           <div class="account-card-header">
-            <div id="logged-avatar-preview" class="account-big-avatar">🎮</div>
+            <div class="avatar-edit-wrapper">
+              <div id="logged-avatar-preview" class="account-big-avatar" title="Click to upload profile photo">🎮</div>
+              <label for="profile-avatar-input" class="avatar-camera-badge" title="Upload or Change Photo">📷</label>
+              <input type="file" id="profile-avatar-input" accept="image/*" class="hidden">
+            </div>
             <div class="account-title-info">
               <h3 id="logged-username-display" class="logged-username">Gamer</h3>
+              <div class="avatar-quick-actions">
+                <label for="profile-avatar-input" class="avatar-action-btn">📷 Edit Photo</label>
+                <button type="button" id="btn-remove-profile-avatar" class="avatar-remove-btn hidden">✖ Remove</button>
+              </div>
               <span id="account-badge-pill" class="account-badge-pill">CLOUD SYNCED ✅</span>
             </div>
           </div>

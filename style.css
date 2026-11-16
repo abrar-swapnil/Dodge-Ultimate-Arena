@@ -1567,6 +1567,70 @@ html, body {
   font-size: 1.8rem;
   overflow: hidden;
   box-shadow: 0 0 15px rgba(255, 204, 0, 0.4);
+  cursor: pointer;
+}
+
+.avatar-edit-wrapper {
+  position: relative;
+  display: inline-block;
+}
+
+.avatar-camera-badge {
+  position: absolute;
+  bottom: -2px;
+  right: -2px;
+  width: 22px;
+  height: 22px;
+  background: #0284c7;
+  border: 2px solid #0f172a;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.7rem;
+  cursor: pointer;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.5);
+  transition: transform 0.15s ease, background 0.15s ease;
+}
+
+.avatar-camera-badge:hover {
+  background: #38bdf8;
+  transform: scale(1.15);
+}
+
+.avatar-quick-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 4px 0 6px 0;
+}
+
+.avatar-action-btn {
+  cursor: pointer;
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: #38bdf8;
+  background: rgba(56, 189, 248, 0.15);
+  border: 1px solid rgba(56, 189, 248, 0.4);
+  padding: 3px 8px;
+  border-radius: 6px;
+  transition: all 0.15s ease;
+}
+
+.avatar-action-btn:hover {
+  background: #38bdf8;
+  color: #0f172a;
+}
+
+.avatar-remove-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: #ef4444;
+  text-decoration: underline;
+  padding: 2px;
 }
 
 .account-big-avatar img {

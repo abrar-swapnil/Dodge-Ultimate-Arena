@@ -2018,6 +2018,67 @@
         const msgEl = document.getElementById("account-status-msg");
         if (msgEl) { msgEl.innerText = "👋 Logged out!"; msgEl.style.color = "#aaa"; }
       });
+
+      // Direct Profile Avatar Upload / Edit in Profile Modal
+      const profileAvatarInput = document.getElementById("profile-avatar-input");
+      const loggedAvatarPreview = document.getElementById("logged-avatar-preview");
+      const btnRemoveProfileAvatar = document.getElementById("btn-remove-profile-avatar");
+      const syncStatusEl = document.getElementById("account-sync-status");
+
+      loggedAvatarPreview?.addEventListener("click", () => {
+        profileAvatarInput?.click();
+      });
+
+      profileAvatarInput?.addEventListener("change", (e) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+
+        const reader = new FileReader();
+        reader.onload = (event) => {
+          const rawUrl = event.target?.result;
+          if (!rawUrl) return;
+
+          // Resize and compress to 128x128 thumbnail
+          const img = new Image();
+          img.onload = () => {
+            const canvas = document.createElement("canvas");
+            canvas.width = 128;
+            canvas.height = 128;
+            const ctx = canvas.getContext("2d");
+            const minDim = Math.min(img.width, img.height);
+            const sx = (img.width - minDim) / 2;
+            const sy = (img.height - minDim) / 2;
+            ctx.drawImage(img, sx, sy, minDim, minDim, 0, 0, 128, 128);
+            const compressed = canvas.toDataURL("image/jpeg", 0.85);
+
+            this.setPlayerPhoto(compressed, true);
+
+            if (syncStatusEl) {
+              syncStatusEl.style.color = "#00e5ff";
+              syncStatusEl.innerText = "⏳ Saving photo to cloud...";
+            }
+            this.syncProfileToCloud(serverUrl).then(() => {
+              if (syncStatusEl) {
+                syncStatusEl.style.color = "#00e5ff";
+                syncStatusEl.innerText = "✅ Profile photo updated & cloud synced!";
+                setTimeout(() => { if (syncStatusEl) syncStatusEl.innerText = ""; }, 3000);
+              }
+            });
+          };
+          img.src = rawUrl;
+        };
+        reader.readAsDataURL(file);
+      });
+
+      btnRemoveProfileAvatar?.addEventListener("click", () => {
+        this.removePlayerPhoto();
+        this.syncProfileToCloud(serverUrl);
+        if (syncStatusEl) {
+          syncStatusEl.style.color = "#ffaa00";
+          syncStatusEl.innerText = "Photo removed. Geometric avatar active.";
+          setTimeout(() => { if (syncStatusEl) syncStatusEl.innerText = ""; }, 3000);
+        }
+      });
     }
 
     _renderSuggestions(suggestions) {
@@ -2251,11 +2312,17 @@
       const avatarEl = document.getElementById("logged-avatar-preview");
       if (avatarEl) {
         if (p.photo) {
-          avatarEl.innerHTML = `<img src="${p.photo}" alt="avatar" style="width:100%;height:100%;object-fit:cover;border-radius:12px;">`;
+          avatarEl.innerHTML = `<img src="${p.photo}" alt="avatar" style="width:100%;height:100%;object-fit:cover;border-radius:50%;">`;
         } else {
           const shapeEmojis = { square: "🟦", circle: "🔵", triangle: "🔺", star: "⭐", diamond: "💎" };
           avatarEl.innerHTML = shapeEmojis[p.shape] || "🎮";
         }
+      }
+
+      const btnRemoveProfileAvatar = document.getElementById("btn-remove-profile-avatar");
+      if (btnRemoveProfileAvatar) {
+        if (p.photo) btnRemoveProfileAvatar.classList.remove("hidden");
+        else btnRemoveProfileAvatar.classList.add("hidden");
       }
     }
 
@@ -2556,6 +2623,12 @@
 
         if (persist) {
           localStorage.setItem("dodgearena_char_photo", dataUrl);
+          if (this.gamerProfile) {
+            this.gamerProfile.photo = dataUrl;
+            localStorage.setItem("dodgearena_gamer_profile", JSON.stringify(this.gamerProfile));
+            this._updateProfileBar();
+            this._updateLoggedInUI();
+          }
         }
 
         // UI Update
@@ -2580,6 +2653,12 @@
 
     removePlayerPhoto() {
       localStorage.removeItem("dodgearena_char_photo");
+      if (this.gamerProfile) {
+        this.gamerProfile.photo = null;
+        localStorage.setItem("dodgearena_gamer_profile", JSON.stringify(this.gamerProfile));
+        this._updateProfileBar();
+        this._updateLoggedInUI();
+      }
       const savedShape = localStorage.getItem("dodgearena_char_shape") || "square";
       this.setPlayerShape(savedShape);
       const uploadText = document.getElementById("photo-upload-text");
