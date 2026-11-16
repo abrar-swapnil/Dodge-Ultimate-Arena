@@ -2028,6 +2028,7 @@
             savedProfile.username.toLowerCase() === savedCreds.username.toLowerCase()) {
           // Set profile data instantly — only update the profile bar, never touch account modal
           this.gamerProfile = { ...savedProfile, offline: false };
+          if (this.p1) this.p1.name = savedProfile.username;
           this._updateProfileBar();
           // NOTE: Do NOT manipulate account modal views here — modal is hidden, let it be
         }
@@ -2071,6 +2072,7 @@
         localStorage.removeItem("dodgearena_gamer_profile");
         localStorage.removeItem("dodgearena_char_photo");
         this.gamerProfile = null;
+        if (this.p1) this.p1.name = "Player 1";
         this.setPlayerShape("square", true);
         this._updateProfileBar();
         document.getElementById("account-logged-in-view")?.classList.add("hidden");
@@ -2373,6 +2375,7 @@
 
     onLoginSuccess(profile) {
       this.gamerProfile = profile;
+      if (this.p1) this.p1.name = profile.username;
       localStorage.setItem("dodgearena_gamer_profile", JSON.stringify(profile));
 
       // Store in permanent local account vault for zero-loss recovery across redeployments
@@ -2795,7 +2798,7 @@
 
       // Broadcast to rival in multiplayer
       if (this.conn && this.conn.open) {
-        this.conn.send({ type: "AVATAR_UPDATE", shape, photo: null });
+        this.conn.send({ type: "AVATAR_UPDATE", name: myPlayer.name, shape, photo: null });
       }
     }
 
@@ -2835,7 +2838,7 @@
 
         // Broadcast to rival in multiplayer (resized thumbnail)
         if (this.conn && this.conn.open) {
-          this.conn.send({ type: "AVATAR_UPDATE", shape: null, photo: dataUrl });
+          this.conn.send({ type: "AVATAR_UPDATE", name: myPlayer.name, shape: null, photo: dataUrl });
         }
       };
       img.src = dataUrl;
@@ -2965,6 +2968,7 @@
           } else if (data.type === "STOP_SPRINT") {
             this.p2.stopSprint();
           } else if (data.type === "AVATAR_UPDATE") {
+            if (data.name) this.p2.name = data.name;
             if (data.photo) {
               const img = new Image();
               img.onload = () => { this.p2.avatarImg = img; };
@@ -2973,11 +2977,13 @@
               this.p2.customShape = data.shape || "square";
               this.p2.avatarImg = null;
             }
+            this.updateHUD();
           }
         } else {
           if (data.type === "STATE") {
             this.syncStateFromHost(data);
           } else if (data.type === "AVATAR_UPDATE") {
+            if (data.name) this.p1.name = data.name;
             if (data.photo) {
               const img = new Image();
               img.onload = () => { this.p1.avatarImg = img; };
@@ -2986,17 +2992,22 @@
               this.p1.customShape = data.shape || "square";
               this.p1.avatarImg = null;
             }
+            this.updateHUD();
           }
         }
       });
 
-      // Send local avatar on connection start
+      // Send local avatar & name on connection start
       const myPlayer = this.isHost ? this.p1 : this.p2;
+      const myName = (this.gamerProfile && this.gamerProfile.username) ? this.gamerProfile.username : (this.isHost ? "Host" : "Guest");
+      myPlayer.name = myName;
       this.conn.send({
         type: "AVATAR_UPDATE",
+        name: myName,
         shape: myPlayer.customShape,
         photo: myPlayer.avatarDataUrl,
       });
+      this.updateHUD();
     }
 
     syncStateFromHost(data) {
@@ -3006,6 +3017,8 @@
       this.mapIndex = data.mapIndex;
       this.p1Score = data.p1Score;
       this.p2Score = data.p2Score;
+      if (data.p1Name) this.p1.name = data.p1Name;
+      if (data.p2Name) this.p2.name = data.p2Name;
       if (data.winner) this.matchWinner = data.winner;
 
       // Play victory / game over sound when match finishes
@@ -3128,6 +3141,8 @@
         mapIndex: this.mapIndex,
         p1Score: this.p1Score,
         p2Score: this.p2Score,
+        p1Name: this.p1.name,
+        p2Name: this.p2.name,
         winner: (this.p1Score >= 30 || (this.state === "MATCH_OVER" && !this.p2.isAlive)) ? "p1" :
                 (this.p2Score >= 30 || (this.state === "MATCH_OVER" && !this.p1.isAlive)) ? "p2" : null,
         p1: {
@@ -3246,6 +3261,17 @@
         else banner.classList.add("hidden");
       }
 
+      const activeName = (this.gamerProfile && this.gamerProfile.username) ? this.gamerProfile.username : "Guest";
+      if (this.mode === "SOLO") {
+        this.p1.name = activeName;
+      } else if (this.mode === "CUSTOM_ROOM") {
+        if (this.isHost) {
+          this.p1.name = activeName;
+        } else {
+          this.p2.name = activeName;
+        }
+      }
+
       this.p1.reset(SCREEN_WIDTH / 2 - 10, SCREEN_HEIGHT / 2 + 100);
       if (this.mode === "CUSTOM_ROOM") {
         this.p1.reset(180, SCREEN_HEIGHT / 2 + 100);
@@ -3293,11 +3319,15 @@
         livesBadge.innerText = fullHearts + emptyHearts;
       }
 
-      // Multiplayer Scores
+      // Multiplayer Scores & Names
       const p1Val = document.getElementById("p1-score-val");
       const p2Val = document.getElementById("p2-score-val");
+      const p1Badge = document.getElementById("p1-name-badge");
+      const p2Badge = document.getElementById("p2-name-badge");
       if (p1Val) p1Val.innerText = this.p1Score;
       if (p2Val) p2Val.innerText = this.p2Score;
+      if (p1Badge) p1Badge.innerText = this.p1.name || "P1";
+      if (p2Badge) p2Badge.innerText = this.p2.name || "P2";
 
       // Cooldown UI overlays
       const dashFill = document.getElementById("dash-cd-fill");
@@ -3417,12 +3447,12 @@
 
         if (this.p1Score >= 25 && !this.p1.isGiant) {
           this.p1.transformToGiant();
-          this.showAnnouncement("PLAYER 1 TRANSFORMED!", "TITAN GIANT UNLOCKED BEAM CANNON (E)!");
+          this.showAnnouncement(`${this.p1.name.toUpperCase()} TRANSFORMED!`, "TITAN GIANT UNLOCKED BEAM CANNON (E)!");
           this.sounds.playWarning();
         }
         if (this.p2Score >= 25 && !this.p2.isGiant) {
           this.p2.transformToGiant();
-          this.showAnnouncement("PLAYER 2 TRANSFORMED!", "TITAN GIANT UNLOCKED BEAM CANNON (E)!");
+          this.showAnnouncement(`${this.p2.name.toUpperCase()} TRANSFORMED!`, "TITAN GIANT UNLOCKED BEAM CANNON (E)!");
           this.sounds.playWarning();
         }
 
@@ -3878,8 +3908,9 @@
       if (this.mode === "SOLO") {
         ctx.textAlign = "left";
         ctx.fillStyle = "#ffffff";
-        ctx.font = "bold 24px monospace, sans-serif";
-        ctx.fillText(`Score: ${this.p1Score}`, 20, 36);
+        ctx.font = "bold 20px monospace, sans-serif";
+        const displayName = this.p1.name || (this.gamerProfile ? this.gamerProfile.username : "Player 1");
+        ctx.fillText(`${displayName} • Score: ${this.p1Score}`, 20, 36);
 
         ctx.fillStyle = "#8888b5";
         ctx.font = "14px monospace, sans-serif";
