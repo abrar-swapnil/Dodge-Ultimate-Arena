@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Dodge Arena - Ultimate</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="theme-color" content="#0a0a23">
+  <meta name="description" content="Dodge Arena Ultimate - Action arcade with Level Bosses, Difficulties, Giant Beam transformation, and WebRTC Custom Rooms.">
+
+  <link rel="icon" type="image/png" href="favicon.png">
+  <link rel="stylesheet" href="style.css">
+  <!-- PeerJS for WebRTC Online Multiplayer -->
+  <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+</head>
+<body>
+  <div id="app-container">
+    <!-- Top toolbar -->
+    <header id="top-bar">
+      <div class="brand">✦ DODGE ARENA</div>
+      <div class="top-status">
+        <span id="level-map-badge" class="badge">LVL 1 - MAP 1</span>
+        <span id="diff-badge" class="badge diff-normal">NORMAL</span>
+      </div>
+      <div class="top-buttons">
+        <button id="menu-btn" class="icon-btn" aria-label="Game Menu">
+          ☰ <span>Menu</span>
+        </button>
+        <button id="sound-btn" class="icon-btn" aria-label="Toggle sound">
+          🔊 <span>Sound</span>
+        </button>
+        <button id="fullscreen-btn" class="icon-btn" aria-label="Toggle fullscreen">
+          ⛶ <span>Fullscreen</span>
+        </button>
+      </div>
+    </header>
+
+    <!-- Boss / Event Caution Warning Banner -->
+    <div id="caution-banner" class="caution-box hidden">
+      <span class="caution-icon">⚠️</span>
+      <span id="caution-text">CAUTION! TITAN BURST CHARGING!</span>
+      <span class="caution-icon">⚠️</span>
+    </div>
+
+    <!-- Match Status Banner (In Multiplayer Custom Room) -->
+    <div id="match-banner" class="hidden">
+      <div class="player-score p1-score">
+        <span class="p-badge p1-badge">P1</span>
+        <span id="p1-score-val" class="score-num">0</span>
+      </div>
+      <div id="round-status-box">
+        <span id="mp-goal-label">GOAL: 30 PTS</span>
+        <span id="giant-status-label" class="giant-hint">GIANT AT 25 PTS</span>
+      </div>
+      <div class="player-score p2-score">
+        <span id="p2-score-val" class="score-num">0</span>
+        <span class="p-badge p2-badge">P2</span>
+      </div>
+    </div>
+
+    <!-- Game canvas viewport -->
+    <main id="game-wrapper">
+      <canvas id="game-canvas" width="800" height="600"></canvas>
+    </main>
+
+    <!-- Mobile Touch Controls -->
+    <div id="mobile-controls">
+      <!-- Virtual Joystick for Movement -->
+      <div id="joystick-zone">
+        <div id="joystick-base">
+          <div id="joystick-knob"></div>
+        </div>
+      </div>
+
+      <!-- Action Buttons -->
+      <div id="mobile-actions">
+        <!-- Emergency Burst Dodge (3 charges) -->
+        <button id="emer-dodge-btn" class="ability-btn emer-btn" aria-label="Emergency Dodge">
+          <span class="btn-icon">🛡️</span>
+          <span class="btn-text">DODGE</span>
+          <span id="dodge-count-badge" class="badge-count">3</span>
+        </button>
+
+        <!-- Sprint Mode (Hold to Boost, 20s Cooldown) -->
+        <button id="sprint-btn" class="ability-btn sprint-btn" aria-label="Hold to Sprint">
+          <span class="btn-icon">🏃</span>
+          <span class="btn-text">SPRINT</span>
+          <div id="sprint-cd-fill" class="cd-overlay"></div>
+        </button>
+
+        <!-- Standard Dash -->
+        <button id="dash-btn" class="ability-btn dash-btn" aria-label="Dash">
+          <span class="btn-icon">⚡</span>
+          <span class="btn-text">DASH</span>
+          <div id="dash-cd-fill" class="cd-overlay"></div>
+        </button>
+
+        <!-- Shockwave Push -->
+        <button id="push-btn" class="ability-btn push-btn" aria-label="Push">
+          <span class="btn-icon">💥</span>
+          <span class="btn-text">PUSH</span>
+          <div id="push-cd-fill" class="cd-overlay"></div>
+        </button>
+
+        <!-- Giant Beam Cannon (Visible when player is Giant) -->
+        <button id="beam-btn" class="ability-btn beam-btn hidden" aria-label="Beam Cannon (E)">
+          <span class="btn-icon">🔴</span>
+          <span class="btn-text">BEAM (E)</span>
+          <div id="beam-cd-fill" class="cd-overlay"></div>
+        </button>
+      </div>
+    </div>
+
+    <!-- Desktop hint -->
+    <div id="desktop-hint">
+      🎮 Move: WASD / Arrows • SHIFT (Hold): Sprint (20s CD) • SPACE: Dash • F: Push • B: Emergency Dodge (3x) • E: Beam (Giant)
+    </div>
+
+    <!-- Main Menu Modal Overlay -->
+    <div id="modal-overlay" class="modal-backdrop">
+      <div class="menu-modal">
+        <h1 class="game-logo">DODGE ARENA</h1>
+        <p class="tagline">Survive. Evolve. Conquer the Boss.</p>
+
+        <!-- Difficulty Selection -->
+        <div class="diff-selection-section">
+          <label class="section-label">Select Difficulty:</label>
+          <div class="diff-btn-group">
+            <button class="diff-pill active" data-diff="NORMAL">Normal</button>
+            <button class="diff-pill" data-diff="MEDIUM">Medium</button>
+            <button class="diff-pill" data-diff="HARD">Hard</button>
+            <button class="diff-pill" data-diff="ULTRA">Ultra Hard</button>
+            <button class="diff-pill danger" data-diff="EXTREME">Extreme</button>
+          </div>
+        </div>
+
+        <div class="mode-cards">
+          <button id="btn-mode-solo" class="mode-card highlight">
+            <div class="mode-icon">🎯</div>
+            <div class="mode-info">
+              <h3>SOLO CAMPAIGN</h3>
+              <p>Map 1 (0-19) ➔ Map 2 (20+) ➔ Map 3 (50+) ➔ Boss Mission (100+) ➔ Level 2!</p>
+            </div>
+          </button>
+
+          <button id="btn-mode-online" class="mode-card accent">
+            <div class="mode-icon">🌐</div>
+            <div class="mode-info">
+              <h3>MULTIPLAYER CUSTOM ROOM</h3>
+              <p>First to 25 pts becomes a GIANT with Beam cannon! Reach 30 pts to win!</p>
+            </div>
+          </button>
+        </div>
+
+        <!-- Online Room Setup Sub-panel -->
+        <div id="online-panel" class="sub-panel hidden">
+          <div class="panel-header">
+            <h4>🌐 Custom Room Setup</h4>
+            <button id="online-back-btn" class="text-btn">← Back</button>
+          </div>
+          
+          <div class="online-options">
+            <div class="online-box">
+              <h5>Host Custom Room</h5>
+              <p>Create a room code and invite your friend.</p>
+              <button id="btn-create-room" class="btn primary-btn">Create Room</button>
+              <div id="room-code-display" class="hidden">
+                <span class="code-label">Room Code:</span>
+                <span id="created-room-code" class="code-badge">----</span>
+                <button id="btn-copy-link" class="btn small-btn">Copy Invite Link</button>
+                <div class="pulse-loader">Waiting for friend to join...</div>
+              </div>
+            </div>
+
+            <div class="divider">OR</div>
+
+            <div class="online-box">
+              <h5>Join Custom Room</h5>
+              <p>Enter the 4-digit room code.</p>
+              <div class="input-group">
+                <input type="text" id="join-room-input" maxlength="6" placeholder="e.g. 7482" autocomplete="off">
+                <button id="btn-join-room" class="btn secondary-btn">Join</button>
+              </div>
+              <div id="join-status" class="status-msg"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Roadmap / Guide -->
+        <div class="how-to-play">
+          <strong>🗺️ Progression:</strong> 20 pts (Map 2 Magma) • 50 pts (Map 3 Abyss) • 100 pts (Level 1 Boss Fight) • 120 pts (Level 2).<br>
+          <strong>👾 Boss Fight:</strong> Boss summons swarms & charges Burst! Use <strong>Emergency Dodge (3x)</strong> to survive.<br>
+          <strong>👑 Multiplayer Giant:</strong> Reach 25 pts to become Giant & shoot 20s Beam ('E' / Button). Rival must survive to 30 pts to win!
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="game.js"></script>
+</body>
+</html>
