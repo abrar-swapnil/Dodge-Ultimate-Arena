@@ -2015,11 +2015,27 @@
         if (msgEl) msgEl.innerText = "";
       });
 
-      // Auto-login from saved credentials
+      // 1. Instant Local Profile Activation (0ms latency - user is instantly logged in)
+      try {
+        const savedCreds = this._getStoredCreds();
+        const savedProfile = JSON.parse(localStorage.getItem("dodgearena_gamer_profile") || "null");
+        if (savedCreds && savedProfile && savedProfile.username && savedProfile.username.toLowerCase() === savedCreds.username.toLowerCase()) {
+          this.onLoginSuccess(savedProfile);
+        }
+      } catch (e) {}
+
+      // 2. Background Cloud Sync & Verification
       const savedCreds = this._getStoredCreds();
       if (savedCreds) {
         this._doAuth("login", savedCreds.username, savedCreds.pin, serverUrl, true /* silent */);
       }
+
+      // 3. Keep-Alive Ping (keeps Render container awake during gameplay)
+      setInterval(() => {
+        if (document.visibilityState === "visible") {
+          fetch(`${serverUrl}/health`).catch(() => {});
+        }
+      }, 5 * 60 * 1000);
 
       // Login / Register form submit
       document.getElementById("gamer-login-form")?.addEventListener("submit", (e) => {
@@ -2163,18 +2179,41 @@
 
     _doAuth(mode, username, pin, serverUrl, silent, attempt) {
       attempt = attempt || 1;
-      const MAX_ATTEMPTS = 3;
+      const MAX_ATTEMPTS = 4;
       const msgEl = document.getElementById("account-status-msg");
 
-      // Show warm-up message on first attempt (Render free tier cold start ~15s)
-      if (!silent && msgEl && attempt === 1) {
+      // 1. Instant Local Vault / Cache Login (0ms instant access)
+      let matchedCachedProfile = null;
+      if (mode === "login") {
+        try {
+          const vault = JSON.parse(localStorage.getItem("dodgearena_account_vault") || "{}");
+          const lowerName = username.toLowerCase();
+          const cachedUser = vault[lowerName] || JSON.parse(localStorage.getItem("dodgearena_gamer_profile") || "null");
+          const savedCreds = this._getStoredCreds();
+          const cachedPin = (cachedUser && cachedUser.pin) || (savedCreds && savedCreds.pin);
+
+          if (cachedUser && cachedPin && cachedPin.toString().trim() === pin.toString().trim() && cachedUser.username.toLowerCase() === lowerName) {
+            matchedCachedProfile = cachedUser;
+            if (!this.gamerProfile) {
+              this.onLoginSuccess(cachedUser);
+            }
+            if (!silent && msgEl && attempt === 1) {
+              msgEl.style.color = "#00e5ff";
+              msgEl.innerText = `✅ Welcome back, ${cachedUser.username}! (Verifying cloud sync...)`;
+            }
+          }
+        } catch (e) {}
+      }
+
+      // Show warm-up message on first attempt if not already logged in from cache
+      if (!silent && msgEl && attempt === 1 && !matchedCachedProfile) {
         msgEl.style.color = "#aaa";
         msgEl.innerText = "⏳ Connecting... (server may take ~15s to wake up)";
       }
 
-      // Use AbortController to enforce a generous timeout (35s)
+      // Use AbortController to enforce a 15s timeout
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 35000);
+      const timeoutId = setTimeout(() => controller.abort(), 15000);
 
       const endpoint = mode === "register" ? `${serverUrl}/api/auth/register` : `${serverUrl}/api/auth/login`;
 
@@ -2215,7 +2254,7 @@
               msgEl.style.color = "#00e5ff";
               msgEl.innerText = data.isNew
                 ? "🎉 New account created! Welcome, " + data.profile.username + "!"
-                : "✅ Welcome back, " + data.profile.username + "!";
+                : "✅ Cloud synced! Welcome back, " + data.profile.username + "!";
             }
           } else {
             if (!silent && msgEl) {
@@ -2231,16 +2270,26 @@
         })
         .catch((err) => {
           clearTimeout(timeoutId);
+
+          // If already logged in via cached profile, don't show scary error
+          if (matchedCachedProfile || this.gamerProfile) {
+            if (!silent && msgEl) {
+              msgEl.style.color = "#38bdf8";
+              msgEl.innerText = "☁️ Playing with local profile. Background cloud sync will reconnect shortly.";
+            }
+            return;
+          }
+
           // Auto-retry up to MAX_ATTEMPTS on network/timeout errors
           if (attempt < MAX_ATTEMPTS) {
             const nextAttempt = attempt + 1;
             if (!silent && msgEl) {
               msgEl.style.color = "#ffaa00";
-              msgEl.innerText = `⏳ Server waking up... retrying (${nextAttempt}/${MAX_ATTEMPTS})`;
+              msgEl.innerText = `⏳ Cloud server deploying / waking up... retrying (${nextAttempt}/${MAX_ATTEMPTS})`;
             }
             setTimeout(() => {
               this._doAuth(mode, username, pin, serverUrl, silent, nextAttempt);
-            }, 5000);
+            }, 4000);
           } else {
             if (!silent) {
               if (mode === "login") {
@@ -2248,7 +2297,6 @@
                   const savedCreds = JSON.parse(localStorage.getItem("dodgearena_gamer_credentials") || "null");
                   const savedProfile = JSON.parse(localStorage.getItem("dodgearena_gamer_profile") || "null");
 
-                  // If this exact username+pin was previously saved locally → allow offline login
                   if (savedCreds && savedCreds.username.toLowerCase() === username.toLowerCase() && savedCreds.pin === pin && savedProfile) {
                     savedProfile.offline = true;
                     this.onLoginSuccess(savedProfile);
@@ -2262,12 +2310,12 @@
 
                 if (msgEl) {
                   msgEl.style.color = "#ff4455";
-                  msgEl.innerText = "❌ Server is unreachable. Please verify your credentials or try again in a minute.";
+                  msgEl.innerText = "❌ Cloud server is rebooting. Please wait ~30s and try again.";
                 }
               } else {
                 if (msgEl) {
-                  msgEl.style.color = "#ff4455";
-                  msgEl.innerText = "❌ Server is unreachable. Please wait a moment for the server to wake up before creating an account.";
+                  msgEl.style.color = "#ffaa00";
+                  msgEl.innerText = "⏳ Cloud server is updating. Please wait 30 seconds for it to finish booting.";
                 }
               }
             }
