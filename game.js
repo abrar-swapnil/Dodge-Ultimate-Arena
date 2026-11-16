@@ -1934,6 +1934,8 @@
         ? "https://dodge-ultimate-arena.onrender.com"
         : "http://localhost:9000";
 
+      this.authMode = "login"; // "login" or "register"
+
       // Warm up Render free-tier server in background immediately on page load
       // so it's awake by the time the user clicks login
       if (IS_PROD) {
@@ -1952,21 +1954,52 @@
         if (e.target === document.getElementById("account-modal-overlay")) closeModal();
       });
 
+      // Tab Switching: Login vs Register
+      const tabLogin = document.getElementById("tab-auth-login");
+      const tabRegister = document.getElementById("tab-auth-register");
+      const descEl = document.getElementById("auth-tab-desc");
+      const submitBtn = document.getElementById("btn-submit-account");
+      const suggestionsBox = document.getElementById("username-suggestions");
+      const msgEl = document.getElementById("account-status-msg");
+
+      tabLogin?.addEventListener("click", () => {
+        this.authMode = "login";
+        tabLogin.classList.add("active");
+        tabRegister?.classList.remove("active");
+        if (descEl) descEl.innerText = "Enter your existing Gamer Tag and secret PIN to load your cloud profile.";
+        if (submitBtn) submitBtn.innerText = "🔑 LOGIN TO ACCOUNT";
+        if (suggestionsBox) suggestionsBox.classList.add("hidden");
+        if (msgEl) msgEl.innerText = "";
+      });
+
+      tabRegister?.addEventListener("click", () => {
+        this.authMode = "register";
+        tabRegister.classList.add("active");
+        tabLogin?.classList.remove("active");
+        if (descEl) descEl.innerText = "Choose a unique Gamer Tag and unique secret PIN (no email needed).";
+        if (submitBtn) submitBtn.innerText = "✨ CREATE NEW ACCOUNT";
+        if (suggestionsBox) suggestionsBox.classList.add("hidden");
+        if (msgEl) msgEl.innerText = "";
+      });
+
       // Auto-login from saved credentials
       const savedCreds = this._getStoredCreds();
       if (savedCreds) {
-        this._doLogin(savedCreds.username, savedCreds.pin, serverUrl, true /* silent */);
+        this._doAuth("login", savedCreds.username, savedCreds.pin, serverUrl, true /* silent */);
       }
 
-      // Login form submit
+      // Login / Register form submit
       document.getElementById("gamer-login-form")?.addEventListener("submit", (e) => {
         e.preventDefault();
         const username = (document.getElementById("acc-username-input")?.value || "").trim();
         const pin = (document.getElementById("acc-pin-input")?.value || "").trim();
-        const msgEl = document.getElementById("account-status-msg");
         if (!username || !pin) return;
-        if (msgEl) msgEl.innerText = "⏳ Connecting...";
-        this._doLogin(username, pin, serverUrl, false);
+        if (msgEl) {
+          msgEl.style.color = "#aaa";
+          msgEl.innerText = "⏳ Connecting...";
+        }
+        if (suggestionsBox) suggestionsBox.classList.add("hidden");
+        this._doAuth(this.authMode, username, pin, serverUrl, false);
       });
 
       // Sync to cloud button
@@ -1987,6 +2020,39 @@
       });
     }
 
+    _renderSuggestions(suggestions) {
+      const container = document.getElementById("suggestion-chips-container");
+      const box = document.getElementById("username-suggestions");
+      if (!container || !box) return;
+
+      container.innerHTML = "";
+      if (!suggestions || suggestions.length === 0) {
+        box.classList.add("hidden");
+        return;
+      }
+
+      suggestions.forEach((tag) => {
+        const chip = document.createElement("button");
+        chip.type = "button";
+        chip.className = "suggestion-chip";
+        chip.innerText = tag;
+        chip.addEventListener("click", () => {
+          const input = document.getElementById("acc-username-input");
+          if (input) input.value = tag;
+          box.classList.add("hidden");
+          document.getElementById("acc-pin-input")?.focus();
+          const msgEl = document.getElementById("account-status-msg");
+          if (msgEl) {
+            msgEl.style.color = "#00e5ff";
+            msgEl.innerText = `Selected '${tag}'! Now enter your PIN and click Create Account.`;
+          }
+        });
+        container.appendChild(chip);
+      });
+
+      box.classList.remove("hidden");
+    }
+
     _getStoredCreds() {
       try {
         const raw = localStorage.getItem("dodgearena_gamer_credentials");
@@ -1998,6 +2064,10 @@
     }
 
     _doLogin(username, pin, serverUrl, silent, attempt) {
+      return this._doAuth("login", username, pin, serverUrl, silent, attempt);
+    }
+
+    _doAuth(mode, username, pin, serverUrl, silent, attempt) {
       attempt = attempt || 1;
       const MAX_ATTEMPTS = 3;
       const msgEl = document.getElementById("account-status-msg");
@@ -2012,7 +2082,9 @@
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 35000);
 
-      return fetch(`${serverUrl}/api/auth/login-or-register`, {
+      const endpoint = mode === "register" ? `${serverUrl}/api/auth/register` : `${serverUrl}/api/auth/login`;
+
+      return fetch(endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ username, pin }),
@@ -2026,6 +2098,9 @@
               JSON.stringify({ username, pin })
             );
             this.onLoginSuccess(data.profile);
+            const suggestionsBox = document.getElementById("username-suggestions");
+            if (suggestionsBox) suggestionsBox.classList.add("hidden");
+
             if (!silent && msgEl) {
               msgEl.style.color = "#00e5ff";
               msgEl.innerText = data.isNew
@@ -2035,8 +2110,12 @@
           } else {
             if (!silent && msgEl) {
               msgEl.style.color = "#ff4455";
-              // server sends 'error' field, not 'message'
-              msgEl.innerText = "❌ " + (data.error || data.message || "Login failed. Check your PIN.");
+              msgEl.innerText = "❌ " + (data.error || data.message || "Authentication failed.");
+            }
+
+            // If username suggestions returned, display them
+            if (data.suggestions && data.suggestions.length > 0) {
+              this._renderSuggestions(data.suggestions);
             }
           }
         })
@@ -2050,34 +2129,35 @@
               msgEl.innerText = `⏳ Server waking up... retrying (${nextAttempt}/${MAX_ATTEMPTS})`;
             }
             setTimeout(() => {
-              this._doLogin(username, pin, serverUrl, silent, nextAttempt);
+              this._doAuth(mode, username, pin, serverUrl, silent, nextAttempt);
             }, 5000);
           } else {
-            // All retries failed → try LOCAL-ONLY offline login if credentials match saved data
             if (!silent) {
-              try {
-                const savedCreds = JSON.parse(localStorage.getItem("dodgearena_gamer_credentials") || "null");
-                const savedProfile = JSON.parse(localStorage.getItem("dodgearena_gamer_profile") || "null");
+              if (mode === "login") {
+                try {
+                  const savedCreds = JSON.parse(localStorage.getItem("dodgearena_gamer_credentials") || "null");
+                  const savedProfile = JSON.parse(localStorage.getItem("dodgearena_gamer_profile") || "null");
 
-                // If this exact username+pin was previously saved locally → allow offline login
-                if (savedCreds && savedCreds.username.toLowerCase() === username.toLowerCase() && savedCreds.pin === pin && savedProfile) {
-                  savedProfile.offline = true;
-                  this.onLoginSuccess(savedProfile);
-                  if (msgEl) {
-                    msgEl.style.color = "#ffaa00";
-                    msgEl.innerText = "⚠️ Offline mode — using saved profile. Sync to cloud when back online.";
+                  // If this exact username+pin was previously saved locally → allow offline login
+                  if (savedCreds && savedCreds.username.toLowerCase() === username.toLowerCase() && savedCreds.pin === pin && savedProfile) {
+                    savedProfile.offline = true;
+                    this.onLoginSuccess(savedProfile);
+                    if (msgEl) {
+                      msgEl.style.color = "#ffaa00";
+                      msgEl.innerText = "⚠️ Offline mode — using saved profile. Sync to cloud when back online.";
+                    }
+                    return;
                   }
-                } else {
-                  // Unknown user or wrong PIN while offline → cannot verify, block login
-                  if (msgEl) {
-                    msgEl.style.color = "#ff4455";
-                    msgEl.innerText = "❌ Server is unreachable. If you have played before, make sure your Gamer Tag & PIN match exactly.";
-                  }
-                }
-              } catch (e) {
+                } catch (e) {}
+
                 if (msgEl) {
                   msgEl.style.color = "#ff4455";
-                  msgEl.innerText = "❌ Server is unreachable. Please try again later.";
+                  msgEl.innerText = "❌ Server is unreachable. Please verify your credentials or try again in a minute.";
+                }
+              } else {
+                if (msgEl) {
+                  msgEl.style.color = "#ff4455";
+                  msgEl.innerText = "❌ Server is unreachable. Please wait a moment for the server to wake up before creating an account.";
                 }
               }
             }

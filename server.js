@@ -5,6 +5,8 @@
 
 const express = require("express");
 const http = require("http");
+const fs = require("fs");
+const path = require("path");
 const { ExpressPeerServer } = require("peer");
 
 const app = express();
@@ -23,10 +25,63 @@ app.use((req, res, next) => {
 
 // In-memory HUD layouts store by user key
 const userHudLayouts = {};
-// In-memory Gamer Profiles & Cloud Save store
+// Gamer Profiles & Cloud Save store
 const gamerProfiles = {};
 // Private in-memory Feedbacks store for developer (Abrar Swapnil)
 const feedbackStore = [];
+
+// Disk persistence for profiles
+const DATA_DIR = path.join(__dirname, "data");
+const DATA_FILE = path.join(DATA_DIR, "gamer_profiles.json");
+
+function loadProfilesFromDisk() {
+  try {
+    if (fs.existsSync(DATA_FILE)) {
+      const raw = fs.readFileSync(DATA_FILE, "utf8");
+      const loaded = JSON.parse(raw);
+      if (loaded && typeof loaded === "object") {
+        Object.assign(gamerProfiles, loaded);
+        console.log(`[STORAGE] Restored ${Object.keys(loaded).length} profiles from disk`);
+      }
+    }
+  } catch (err) {
+    console.error("[STORAGE] Failed to load gamer_profiles.json:", err.message);
+  }
+}
+
+function saveProfilesToDisk() {
+  try {
+    if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+    fs.writeFileSync(DATA_FILE, JSON.stringify(gamerProfiles, null, 2), "utf8");
+  } catch (err) {
+    console.error("[STORAGE] Failed to save gamer_profiles.json:", err.message);
+  }
+}
+
+// Load on startup
+loadProfilesFromDisk();
+
+function generateSuggestions(username) {
+  const base = username.replace(/[^a-zA-Z0-9]/g, "");
+  const candidates = [
+    `${base}_${Math.floor(10 + Math.random() * 89)}`,
+    `${base}_pro`,
+    `${base}_arena`,
+    `${base}_${Math.floor(100 + Math.random() * 899)}`,
+    `the_${base}`,
+    `${base}99`,
+    `${base}_hero`,
+  ];
+  const available = candidates.filter(name => !gamerProfiles[name.toLowerCase()]);
+  return available.slice(0, 3);
+}
+
+function isPinInUse(pin, excludeUsernameKey) {
+  return Object.keys(gamerProfiles).some(k => {
+    if (excludeUsernameKey && k === excludeUsernameKey) return false;
+    return gamerProfiles[k].pin === pin;
+  });
+}
 
 // Health check
 app.get("/", (req, res) => {
@@ -43,8 +98,9 @@ app.get("/health", (req, res) => {
 });
 
 // ══ GAMER ACCOUNT AUTH (NO EMAIL REQUIRED) ══════════════════════
-// Auto-Registers new Gamer Tag OR logs into existing with PIN
-app.post("/api/auth/login-or-register", (req, res) => {
+
+// 1. REGISTER: Create a brand new unique Gamer Tag & unique Secret PIN
+app.post("/api/auth/register", (req, res) => {
   const { username, pin } = req.body;
   if (!username || !pin) {
     return res.status(400).json({ success: false, error: "Gamer Tag and PIN are required." });
@@ -61,9 +117,110 @@ app.post("/api/auth/login-or-register", (req, res) => {
     return res.status(400).json({ success: false, error: "Secret PIN must be 3 to 12 digits/letters." });
   }
 
+  // Check 1: Username must be unique
+  if (gamerProfiles[key]) {
+    const suggestions = generateSuggestions(cleanName);
+    return res.status(409).json({
+      success: false,
+      error: `Gamer Tag '${cleanName}' is already taken!`,
+      suggestions,
+    });
+  }
+
+  // Check 2: Secret PIN must be unique across all players
+  if (isPinInUse(cleanPin)) {
+    return res.status(409).json({
+      success: false,
+      error: "This secret PIN is already in use by another gamer! For your account security, please pick a unique PIN.",
+    });
+  }
+
+  // Create new profile
+  const user = {
+    username: cleanName,
+    pin: cleanPin,
+    shape: "square",
+    photo: null,
+    hudLayout: userHudLayouts[cleanName]?.layout || null,
+    stats: {
+      highScore: 0,
+      mpWins: 0,
+      mpLosses: 0,
+      bossesDefeated: 0,
+      totalMatches: 0,
+    },
+    createdAt: new Date().toISOString(),
+    lastLoginAt: new Date().toISOString(),
+  };
+
+  gamerProfiles[key] = user;
+  saveProfilesToDisk();
+  console.log(`[AUTH] New Gamer registered: ${user.username}`);
+  return res.json({ success: true, isNew: true, profile: sanitizeProfile(user) });
+});
+
+// 2. LOGIN: Authenticate existing Gamer Tag with Secret PIN
+app.post("/api/auth/login", (req, res) => {
+  const { username, pin } = req.body;
+  if (!username || !pin) {
+    return res.status(400).json({ success: false, error: "Gamer Tag and PIN are required." });
+  }
+
+  const cleanName = username.trim();
+  const key = cleanName.toLowerCase();
+  const cleanPin = pin.toString().trim();
+
+  const user = gamerProfiles[key];
+  if (!user) {
+    return res.status(404).json({
+      success: false,
+      error: `No account found with Gamer Tag '${cleanName}'. Switch to 'Create Account' if you are new!`,
+    });
+  }
+
+  if (user.pin !== cleanPin) {
+    return res.status(401).json({
+      success: false,
+      error: `Incorrect PIN for Gamer Tag '${cleanName}'.`,
+    });
+  }
+
+  user.lastLoginAt = new Date().toISOString();
+  saveProfilesToDisk();
+  console.log(`[AUTH] Gamer logged in: ${user.username}`);
+  return res.json({ success: true, isNew: false, profile: sanitizeProfile(user) });
+});
+
+// 3. Combined / Legacy Endpoint
+app.post("/api/auth/login-or-register", (req, res) => {
+  const { action } = req.body;
+  if (action === "register") {
+    return app._router.handle({ ...req, url: "/api/auth/register", method: "POST" }, res);
+  }
+  if (action === "login") {
+    return app._router.handle({ ...req, url: "/api/auth/login", method: "POST" }, res);
+  }
+
+  // Default fallback behavior:
+  const { username, pin } = req.body;
+  if (!username || !pin) {
+    return res.status(400).json({ success: false, error: "Gamer Tag and PIN are required." });
+  }
+
+  const cleanName = username.trim();
+  const key = cleanName.toLowerCase();
+  const cleanPin = pin.toString().trim();
+
   let user = gamerProfiles[key];
   if (!user) {
-    // New Account Creation
+    // Check PIN uniqueness before creating
+    if (isPinInUse(cleanPin)) {
+      return res.status(409).json({
+        success: false,
+        error: "This secret PIN is already in use by another gamer! Please pick a unique PIN.",
+      });
+    }
+
     user = {
       username: cleanName,
       pin: cleanPin,
@@ -81,20 +238,19 @@ app.post("/api/auth/login-or-register", (req, res) => {
       lastLoginAt: new Date().toISOString(),
     };
     gamerProfiles[key] = user;
-    console.log(`[AUTH] New Gamer registered: ${user.username}`);
+    saveProfilesToDisk();
     return res.json({ success: true, isNew: true, profile: sanitizeProfile(user) });
   }
 
-  // Existing Gamer PIN Authentication
   if (user.pin !== cleanPin) {
     return res.status(401).json({
       success: false,
-      error: "Incorrect PIN for this Gamer Tag. If this is a new account, please pick a unique Gamer Tag!",
+      error: `Incorrect PIN for Gamer Tag '${cleanName}'.`,
     });
   }
 
   user.lastLoginAt = new Date().toISOString();
-  console.log(`[AUTH] Gamer logged in: ${user.username}`);
+  saveProfilesToDisk();
   return res.json({ success: true, isNew: false, profile: sanitizeProfile(user) });
 });
 
@@ -127,6 +283,7 @@ app.post("/api/profile/save", (req, res) => {
     };
   }
 
+  saveProfilesToDisk();
   return res.json({ success: true, profile: sanitizeProfile(user) });
 });
 

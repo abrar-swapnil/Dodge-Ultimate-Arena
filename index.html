@@ -494,29 +494,37 @@
           <button id="btn-close-account-modal" class="text-btn">✖ Close</button>
         </div>
 
-        <!-- Logged Out View (Login / Auto-Register Form) -->
+        <!-- Logged Out View (Login / Register Form) -->
         <div id="account-logged-out-view">
-          <p class="tagline">Keep your custom avatar photo, controls & game stats saved across phone and laptop!</p>
-          <div class="auth-notice-box">
-            <span>✨ <strong>No Email Required!</strong> Just pick a Gamer Tag and a secret PIN.</span>
+          <!-- Auth Mode Tabs -->
+          <div class="auth-tabs-bar">
+            <button type="button" id="tab-auth-login" class="auth-tab-btn active">🔑 Login</button>
+            <button type="button" id="tab-auth-register" class="auth-tab-btn">✨ Create Account</button>
           </div>
-          <div class="auth-notice-box" style="margin-top:6px; background: rgba(255,170,0,0.08); border-color: rgba(255,170,0,0.4); font-size: 0.8rem; color: #ccc;">
-            ⚠️ <strong>Gamer Tag = your account ID.</strong> Same tag + same PIN = login to your account. Different tag = brand new account.
+
+          <div id="auth-tab-desc" class="auth-tab-desc">
+            Enter your existing Gamer Tag and secret PIN to load your cloud profile.
           </div>
 
           <form id="gamer-login-form" class="feedback-form" style="margin-top: 10px;">
             <div class="form-group">
-              <label class="form-label">Gamer Tag (Username):</label>
+              <label class="form-label" id="acc-username-label">Gamer Tag (Username):</label>
               <input type="text" id="acc-username-input" class="fb-input" placeholder="e.g. AbrarSwapnil, Shadow99" maxlength="20" required autocomplete="username">
             </div>
 
+            <!-- Dynamic Username Suggestions (appears if username is taken during register) -->
+            <div id="username-suggestions" class="username-suggestions hidden">
+              <span class="suggestion-title">💡 Suggested available tags (tap to pick):</span>
+              <div id="suggestion-chips-container" class="suggestion-chips"></div>
+            </div>
+
             <div class="form-group">
-              <label class="form-label">Secret PIN (3-8 digits/letters):</label>
+              <label class="form-label" id="acc-pin-label">Secret PIN (3-12 digits/letters):</label>
               <input type="password" id="acc-pin-input" class="fb-input" placeholder="e.g. 1234" maxlength="12" required autocomplete="current-password">
             </div>
 
-            <button type="submit" id="btn-submit-account" class="btn primary-btn" style="width: 100%; margin-top: 6px;">
-              🚀 LOGIN / CREATE ACCOUNT
+            <button type="submit" id="btn-submit-account" class="btn primary-btn" style="width: 100%; margin-top: 8px;">
+              🔑 LOGIN TO ACCOUNT
             </button>
             <div id="account-status-msg" class="status-msg" style="text-align: center; margin-top: 8px;"></div>
           </form>
