@@ -74,6 +74,13 @@ html, body {
   border-color: rgba(0, 229, 255, 0.4);
 }
 
+.lives-badge {
+  letter-spacing: 2px;
+  background: rgba(255, 20, 50, 0.18);
+  border-color: rgba(255, 50, 80, 0.5);
+  font-size: 0.85rem;
+}
+
 .diff-normal { color: #35d680; border-color: rgba(53, 214, 128, 0.4); }
 .diff-medium { color: #ffcc00; border-color: rgba(255, 204, 0, 0.4); }
 .diff-hard { color: #ff8833; border-color: rgba(255, 136, 51, 0.4); }

@@ -296,6 +296,8 @@
       this.shockwaveVisual = null;
       this.trails = [];
       this.isAlive = true;
+      this.lives = 3;
+      this.invulnerableTimer = 0; // after taking hit
 
       // Custom Shape and Photo Avatar
       this.customShape = "square"; // 'square', 'circle', 'triangle', 'diamond', 'star'
@@ -327,10 +329,12 @@
       this.shockwaveVisual = null;
       this.trails = [];
       this.isAlive = true;
+      this.lives = 3;
+      this.invulnerableTimer = 0;
     }
 
     get isInvulnerable() {
-      return this.dashTimer > 0 || this.emerDodgeTimer > 0;
+      return this.dashTimer > 0 || this.emerDodgeTimer > 0 || this.invulnerableTimer > 0;
     }
 
     get rect() {
@@ -428,6 +432,7 @@
       if (this.pushCooldown > 0) this.pushCooldown = Math.max(0, this.pushCooldown - dt);
       if (this.speedBuffTimer > 0) this.speedBuffTimer = Math.max(0, this.speedBuffTimer - dt);
       if (this.emerDodgeTimer > 0) this.emerDodgeTimer = Math.max(0, this.emerDodgeTimer - dt);
+      if (this.invulnerableTimer > 0) this.invulnerableTimer = Math.max(0, this.invulnerableTimer - dt);
       if (this.beamCooldown > 0) this.beamCooldown = Math.max(0, this.beamCooldown - dt);
       if (this.sprintCooldown > 0) this.sprintCooldown = Math.max(0, this.sprintCooldown - dt);
 
@@ -501,6 +506,11 @@
 
     draw(ctx) {
       if (!this.isAlive) return;
+
+      // Blink when taking damage (invulnerable iframe)
+      if (this.invulnerableTimer > 0 && Math.floor(performance.now() / 80) % 2 === 0) {
+        return;
+      }
 
       // Trails
       for (let i = 0; i < this.trails.length; i++) {
@@ -2116,6 +2126,15 @@
         lvlBadge.innerText = `LVL ${this.level} - MAP ${this.mapIndex} (${theme.name})`;
       }
 
+      // Player Lives Hearts
+      const myPlayer = (this.mode === "CUSTOM_ROOM" && this.myRole === "p2") ? this.p2 : this.p1;
+      const livesBadge = document.getElementById("player-lives-badge");
+      if (livesBadge) {
+        const fullHearts = "❤️".repeat(Math.max(0, myPlayer.lives));
+        const emptyHearts = "🖤".repeat(Math.max(0, 3 - myPlayer.lives));
+        livesBadge.innerText = fullHearts + emptyHearts;
+      }
+
       // Multiplayer Scores
       const p1Val = document.getElementById("p1-score-val");
       const p2Val = document.getElementById("p2-score-val");
@@ -2123,7 +2142,6 @@
       if (p2Val) p2Val.innerText = this.p2Score;
 
       // Cooldown UI overlays
-      const myPlayer = (this.mode === "CUSTOM_ROOM" && this.myRole === "p2") ? this.p2 : this.p1;
       const dashFill = document.getElementById("dash-cd-fill");
       const pushFill = document.getElementById("push-cd-fill");
       const beamFill = document.getElementById("beam-cd-fill");
@@ -2270,9 +2288,7 @@
 
         if (dist < 260) {
           if (!p.isInvulnerable) {
-            p.isAlive = false;
-            this.sounds.playGameOver();
-            this.state = "MATCH_OVER";
+            this.handlePlayerHit(p, "BOSS_BURST");
           } else {
             this.floatingTexts.push(new FloatingText(p.x, p.y, "BURST EVADED!", "#ffcc00"));
           }
@@ -2415,6 +2431,37 @@
       this.items.push(new Collectible(x, y, pts, isAttackOrb));
     }
 
+    handlePlayerHit(player, hitSource = "ENEMY") {
+      if (player.isInvulnerable) return;
+
+      if (player.hasShield) {
+        player.hasShield = false;
+        player.invulnerableTimer = 1.0;
+        this.floatingTexts.push(new FloatingText(player.x, player.y, "SHIELD BROKE!", "#00e5ff"));
+        return;
+      }
+
+      player.lives = Math.max(0, player.lives - 1);
+      this.updateHUD();
+
+      if (player.lives > 0) {
+        // Player still has lives left! Give iframe and warning
+        player.invulnerableTimer = 1.6; // 1.6s invulnerability blink
+        this.sounds.playWarning();
+        const msg = player.lives === 2 ? "❤️ 2 LIVES REMAINING!" : "⚠️ 1 LIFE LEFT! CAUTION!";
+        this.floatingTexts.push(new FloatingText(player.x, player.y, msg, "#ff2244"));
+        for (let p = 0; p < 15; p++) {
+          this.particles.push(new Particle(player.x + player.size / 2, player.y + player.size / 2, "#ff2244"));
+        }
+      } else {
+        // 3 Lives Lost -> ELIMINATED!
+        player.isAlive = false;
+        this.sounds.playGameOver();
+        this.state = "MATCH_OVER";
+        this.floatingTexts.push(new FloatingText(player.x, player.y, "💀 ELIMINATED!", "#ff0000"));
+      }
+    }
+
     checkCollisions() {
       const players = this.mode === "SOLO" ? [this.p1] : [this.p1, this.p2];
 
@@ -2444,10 +2491,9 @@
               continue;
             }
 
-            player.isAlive = false;
-            this.sounds.playGameOver();
-            this.state = "MATCH_OVER";
-            return;
+            this.handlePlayerHit(player, "ENEMY");
+            if (!player.isAlive) return;
+            continue;
           }
         }
 
@@ -2462,10 +2508,8 @@
 
           if (distToBeam < player.size / 2 + 12) {
             if (!player.isInvulnerable) {
-              player.isAlive = false;
-              this.sounds.playGameOver();
-              this.state = "MATCH_OVER";
-              return;
+              this.handlePlayerHit(player, "BEAM");
+              if (!player.isAlive) return;
             } else {
               this.floatingTexts.push(new FloatingText(player.x, player.y, "BEAM DEFLECTED!", "#00e5ff"));
             }
