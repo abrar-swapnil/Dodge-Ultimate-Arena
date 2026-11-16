@@ -459,12 +459,14 @@ html, body {
   /* Compact Action buttons for easy tapping without overlapping */
   #mobile-controls {
     height: 140px;
-    padding: 0 10px max(10px, env(safe-area-inset-bottom));
+    padding: 0 16px max(14px, env(safe-area-inset-bottom));
   }
 
   #joystick-zone {
     width: 110px;
     height: 110px;
+    margin-left: 12px; /* Shift joystick slightly to the right for natural thumb reach in portrait */
+    margin-bottom: 4px;
   }
 
   #joystick-base {
