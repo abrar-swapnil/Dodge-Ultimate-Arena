@@ -1,33 +1,18 @@
 /**
  * Dodge Arena Ultimate — PeerJS Signaling Server
- * Deploy on Render (free tier) as a Node.js web service.
+ * Runs on Render free tier
  */
 
-const { PeerServer } = require("@peerjs/server");
-const express = require("express");
+const { PeerServer } = require("peer");
 
-const app = express();
 const PORT = process.env.PORT || 9000;
 
-// Health check
-app.get("/", (req, res) => {
-  res.json({
-    status: "ok",
-    service: "Dodge Arena Ultimate — PeerJS Signaling Server",
-    uptime: Math.floor(process.uptime()) + "s",
-  });
-});
-
-app.get("/health", (req, res) => {
-  res.json({ status: "healthy" });
-});
-
-// PeerJS Server
 const peerServer = PeerServer({
   port: PORT,
   path: "/peerjs",
-  proxied: true,
   key: "dodge-arena",
+  proxied: true,
+  alive_timeout: 60000,
   corsOptions: {
     origin: "*",
     methods: ["GET", "POST"],
@@ -42,4 +27,4 @@ peerServer.on("disconnect", (client) => {
   console.log(`[-] Peer disconnected: ${client.getId()}`);
 });
 
-console.log(`✅ Dodge Arena PeerJS server running on port ${PORT}`);
+console.log(`✅ PeerJS server running on port ${PORT}`);
