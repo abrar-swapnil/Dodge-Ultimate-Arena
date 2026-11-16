@@ -1194,8 +1194,16 @@
         const emailParams = {
           name: payload.name,
           email: payload.email || "Not provided",
-          title: payload.type,
-          message: payload.message,
+          title: `🎮 Dodge Arena Ultimate — ${payload.type}`,
+          message: `📩 GAME FEEDBACK — Dodge Arena Ultimate\n` +
+                   `━━━━━━━━━━━━━━━━━━━━━━\n` +
+                   `🗂 Type     : ${payload.type}\n` +
+                   `👤 Player  : ${payload.name}\n` +
+                   `📧 Email    : ${payload.email || "Not provided"}\n` +
+                   `📱 Device  : ${payload.deviceInfo}\n` +
+                   `🕐 Time     : ${new Date().toLocaleString("en-BD", { timeZone: "Asia/Dhaka" })}\n` +
+                   `━━━━━━━━━━━━━━━━━━━━━━\n\n` +
+                   `💬 Message:\n${payload.message}`,
           time: new Date().toLocaleString("en-BD", { timeZone: "Asia/Dhaka" }),
         };
 
