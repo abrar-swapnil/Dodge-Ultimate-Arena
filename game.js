@@ -2029,13 +2029,14 @@
             if (!silent && msgEl) {
               msgEl.style.color = "#00e5ff";
               msgEl.innerText = data.isNew
-                ? "🎉 Account created! Welcome, " + data.profile.username + "!"
+                ? "🎉 New account created! Welcome, " + data.profile.username + "!"
                 : "✅ Welcome back, " + data.profile.username + "!";
             }
           } else {
             if (!silent && msgEl) {
               msgEl.style.color = "#ff4455";
-              msgEl.innerText = "❌ " + (data.message || "Login failed. Check your PIN.");
+              // server sends 'error' field, not 'message'
+              msgEl.innerText = "❌ " + (data.error || data.message || "Login failed. Check your PIN.");
             }
           }
         })
@@ -2052,28 +2053,32 @@
               this._doLogin(username, pin, serverUrl, silent, nextAttempt);
             }, 5000);
           } else {
-            // All retries failed → create LOCAL-ONLY offline profile so user is never blocked
+            // All retries failed → try LOCAL-ONLY offline login if credentials match saved data
             if (!silent) {
-              const offlineProfile = {
-                username,
-                shape: localStorage.getItem("dodgearena_char_shape") || "square",
-                photo: localStorage.getItem("dodgearena_char_photo") || null,
-                hudLayout: null,
-                stats: { highScore: 0, mpWins: 0, mpLosses: 0, bossesDefeated: 0, totalMatches: 0 },
-                offline: true,
-              };
-              // Try to restore saved stats if available
               try {
-                const saved = JSON.parse(localStorage.getItem("dodgearena_gamer_profile") || "null");
-                if (saved && saved.username === username && saved.stats) {
-                  offlineProfile.stats = saved.stats;
+                const savedCreds = JSON.parse(localStorage.getItem("dodgearena_gamer_credentials") || "null");
+                const savedProfile = JSON.parse(localStorage.getItem("dodgearena_gamer_profile") || "null");
+
+                // If this exact username+pin was previously saved locally → allow offline login
+                if (savedCreds && savedCreds.username.toLowerCase() === username.toLowerCase() && savedCreds.pin === pin && savedProfile) {
+                  savedProfile.offline = true;
+                  this.onLoginSuccess(savedProfile);
+                  if (msgEl) {
+                    msgEl.style.color = "#ffaa00";
+                    msgEl.innerText = "⚠️ Offline mode — using saved profile. Sync to cloud when back online.";
+                  }
+                } else {
+                  // Unknown user or wrong PIN while offline → cannot verify, block login
+                  if (msgEl) {
+                    msgEl.style.color = "#ff4455";
+                    msgEl.innerText = "❌ Server is unreachable. If you have played before, make sure your Gamer Tag & PIN match exactly.";
+                  }
                 }
-              } catch (e) {}
-              localStorage.setItem("dodgearena_gamer_credentials", JSON.stringify({ username, pin }));
-              this.onLoginSuccess(offlineProfile);
-              if (msgEl) {
-                msgEl.style.color = "#ffaa00";
-                msgEl.innerText = "⚠️ Offline mode — stats saved locally. Cloud sync will auto-resume when server is back.";
+              } catch (e) {
+                if (msgEl) {
+                  msgEl.style.color = "#ff4455";
+                  msgEl.innerText = "❌ Server is unreachable. Please try again later.";
+                }
               }
             }
           }
