@@ -17,7 +17,7 @@
   // PRODUCTION: uses your Render backend server
   const IS_PROD = window.location.hostname !== "localhost" && window.location.hostname !== "127.0.0.1";
   const PEER_SERVER_CONFIG = IS_PROD ? {
-    host: "dodge-arena-peerjs.onrender.com", // ← your Render service URL (update after deploy!)
+    host: "dodge-ultimate-arena.onrender.com", // ✅ Render backend
     port: 443,
     path: "/peerjs",
     key: "dodge-arena",
