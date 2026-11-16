@@ -211,6 +211,20 @@
         <h1 class="game-logo">DODGE ARENA</h1>
         <p class="tagline">Survive • Evolve • Slay the Titan Bosses</p>
 
+        <!-- Gamer Account Profile Bar -->
+        <div id="gamer-profile-bar" class="gamer-account-bar">
+          <div class="gamer-info-left">
+            <div id="gamer-avatar-badge" class="gamer-avatar-badge">🎮</div>
+            <div class="gamer-text">
+              <span id="gamer-name-display" class="gamer-name">Guest Player</span>
+              <span id="gamer-stats-summary" class="gamer-summary">No account • Stats unsaved</span>
+            </div>
+          </div>
+          <button id="btn-open-account-modal" class="btn small-btn account-trigger-btn">
+            🔑 <span>PROFILE & SAVE</span>
+          </button>
+        </div>
+
         <!-- 1 & 2. Solo & Multiplayer Modes -->
         <div class="mode-cards">
           <button id="btn-mode-solo" class="mode-card highlight">
@@ -471,6 +485,85 @@
       <div id="hud-save-status" class="hud-save-alert hidden">Layout saved locally & to cloud!</div>
     </div>
   </div>
+
+    <!-- Gamer Account & Cloud Profile Modal Overlay -->
+    <div id="account-modal-overlay" class="modal-backdrop hidden">
+      <div class="menu-modal account-modal-window">
+        <div class="panel-header">
+          <h3 style="color: #38bdf8;">👤 GAMER PROFILE & CLOUD SAVE</h3>
+          <button id="btn-close-account-modal" class="text-btn">✖ Close</button>
+        </div>
+
+        <!-- Logged Out View (Login / Auto-Register Form) -->
+        <div id="account-logged-out-view">
+          <p class="tagline">Keep your custom avatar photo, controls & game stats saved across phone and laptop!</p>
+          <div class="auth-notice-box">
+            <span>✨ <strong>No Email Required!</strong> Just pick a Gamer Tag and a secret PIN.</span>
+          </div>
+
+          <form id="gamer-login-form" class="feedback-form" style="margin-top: 10px;">
+            <div class="form-group">
+              <label class="form-label">Gamer Tag (Username):</label>
+              <input type="text" id="acc-username-input" class="fb-input" placeholder="e.g. AbrarSwapnil, Shadow99" maxlength="20" required autocomplete="username">
+            </div>
+
+            <div class="form-group">
+              <label class="form-label">Secret PIN (3-8 digits/letters):</label>
+              <input type="password" id="acc-pin-input" class="fb-input" placeholder="e.g. 1234" maxlength="12" required autocomplete="current-password">
+            </div>
+
+            <button type="submit" id="btn-submit-account" class="btn primary-btn" style="width: 100%; margin-top: 6px;">
+              🚀 LOGIN / CREATE ACCOUNT
+            </button>
+            <div id="account-status-msg" class="status-msg" style="text-align: center; margin-top: 8px;"></div>
+          </form>
+        </div>
+
+        <!-- Logged In View -->
+        <div id="account-logged-in-view" class="hidden">
+          <div class="account-card-header">
+            <div id="logged-avatar-preview" class="account-big-avatar">🎮</div>
+            <div class="account-title-info">
+              <h3 id="logged-username-display" class="logged-username">Gamer</h3>
+              <span id="account-badge-pill" class="account-badge-pill">CLOUD SYNCED ✅</span>
+            </div>
+          </div>
+
+          <div class="stats-grid">
+            <div class="stat-card">
+              <span class="stat-icon">🏆</span>
+              <span id="stat-mp-wins" class="stat-val">0</span>
+              <span class="stat-label">Multiplayer Wins</span>
+            </div>
+            <div class="stat-card">
+              <span class="stat-icon">⭐</span>
+              <span id="stat-high-score" class="stat-val">0</span>
+              <span class="stat-label">High Score</span>
+            </div>
+            <div class="stat-card">
+              <span class="stat-icon">👾</span>
+              <span id="stat-boss-kills" class="stat-val">0</span>
+              <span class="stat-label">Bosses Slayed</span>
+            </div>
+            <div class="stat-card">
+              <span class="stat-icon">🎮</span>
+              <span id="stat-matches-total" class="stat-val">0</span>
+              <span class="stat-label">Total Matches</span>
+            </div>
+          </div>
+
+          <div class="account-actions">
+            <button type="button" id="btn-sync-cloud-now" class="btn secondary-btn" style="flex: 1;">
+              ☁️ Sync to Cloud
+            </button>
+            <button type="button" id="btn-logout-account" class="btn danger-btn" style="flex: 1;">
+              🚪 Switch / Logout
+            </button>
+          </div>
+          <div id="account-sync-status" class="status-msg" style="text-align: center; margin-top: 6px;"></div>
+        </div>
+      </div>
+    </div>
 
   <script src="game.js"></script>
   <!-- SEO Content for Google Crawlers -->

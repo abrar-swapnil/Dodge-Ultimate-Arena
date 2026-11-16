@@ -1147,11 +1147,13 @@
       this.isHost = false;
       this.myRole = "p1";
 
+      this.gamerProfile = null; // null = guest, object = logged-in profile
       this.setupDOM();
       this.setupKeyboard();
       this.setupTouch();
       this.setupCanvasScaling();
       this.initUserAndLoadHUD();
+      this.initAccountSystem();
     }
 
     // --- DOM Setup ---
@@ -1924,6 +1926,250 @@
       }
     }
 
+    // --- Gamer Account System ---
+    initAccountSystem() {
+      if (typeof window === "undefined") return;
+
+      const serverUrl = IS_PROD
+        ? "https://dodge-ultimate-arena.onrender.com"
+        : "http://localhost:9000";
+
+      // Open / close modal
+      document.getElementById("btn-open-account-modal")?.addEventListener("click", () => {
+        document.getElementById("account-modal-overlay")?.classList.remove("hidden");
+      });
+      const closeModal = () => {
+        document.getElementById("account-modal-overlay")?.classList.add("hidden");
+      };
+      document.getElementById("btn-close-account-modal")?.addEventListener("click", closeModal);
+      document.getElementById("account-modal-overlay")?.addEventListener("click", (e) => {
+        if (e.target === document.getElementById("account-modal-overlay")) closeModal();
+      });
+
+      // Auto-login from saved credentials
+      const savedCreds = this._getStoredCreds();
+      if (savedCreds) {
+        this._doLogin(savedCreds.username, savedCreds.pin, serverUrl, true /* silent */);
+      }
+
+      // Login form submit
+      document.getElementById("gamer-login-form")?.addEventListener("submit", (e) => {
+        e.preventDefault();
+        const username = (document.getElementById("acc-username-input")?.value || "").trim();
+        const pin = (document.getElementById("acc-pin-input")?.value || "").trim();
+        const msgEl = document.getElementById("account-status-msg");
+        if (!username || !pin) return;
+        if (msgEl) msgEl.innerText = "⏳ Connecting...";
+        this._doLogin(username, pin, serverUrl, false);
+      });
+
+      // Sync to cloud button
+      document.getElementById("btn-sync-cloud-now")?.addEventListener("click", () => {
+        this.syncProfileToCloud(serverUrl);
+      });
+
+      // Logout button
+      document.getElementById("btn-logout-account")?.addEventListener("click", () => {
+        localStorage.removeItem("dodgearena_gamer_credentials");
+        localStorage.removeItem("dodgearena_gamer_profile");
+        this.gamerProfile = null;
+        this._updateProfileBar();
+        document.getElementById("account-logged-in-view")?.classList.add("hidden");
+        document.getElementById("account-logged-out-view")?.classList.remove("hidden");
+        const msgEl = document.getElementById("account-status-msg");
+        if (msgEl) { msgEl.innerText = "👋 Logged out!"; msgEl.style.color = "#aaa"; }
+      });
+    }
+
+    _getStoredCreds() {
+      try {
+        const raw = localStorage.getItem("dodgearena_gamer_credentials");
+        if (!raw) return null;
+        const c = JSON.parse(raw);
+        if (c && c.username && c.pin) return c;
+      } catch (e) {}
+      return null;
+    }
+
+    _doLogin(username, pin, serverUrl, silent) {
+      const msgEl = document.getElementById("account-status-msg");
+      return fetch(`${serverUrl}/api/auth/login-or-register`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username, pin }),
+      })
+        .then((r) => r.json())
+        .then((data) => {
+          if (data && data.success && data.profile) {
+            // Save credentials
+            localStorage.setItem(
+              "dodgearena_gamer_credentials",
+              JSON.stringify({ username, pin })
+            );
+            this.onLoginSuccess(data.profile);
+            if (!silent && msgEl) {
+              msgEl.style.color = "#00e5ff";
+              msgEl.innerText = data.isNew
+                ? "🎉 Account created! Welcome, " + data.profile.username + "!"
+                : "✅ Welcome back, " + data.profile.username + "!";
+            }
+          } else {
+            if (!silent && msgEl) {
+              msgEl.style.color = "#ff4455";
+              msgEl.innerText = "❌ " + (data.message || "Login failed. Check your PIN.");
+            }
+          }
+        })
+        .catch(() => {
+          if (!silent && msgEl) {
+            msgEl.style.color = "#ff4455";
+            msgEl.innerText = "❌ Could not connect to server. Try again later.";
+          }
+        });
+    }
+
+    onLoginSuccess(profile) {
+      this.gamerProfile = profile;
+      localStorage.setItem("dodgearena_gamer_profile", JSON.stringify(profile));
+
+      // Apply saved avatar
+      if (profile.photo) {
+        this.setPlayerPhoto(profile.photo, false);
+      } else if (profile.shape) {
+        this.setPlayerShape(profile.shape, false);
+      }
+
+      // Apply saved HUD layout if exists and no local one
+      if (profile.hudLayout) {
+        try {
+          this.applyHudLayout(profile.hudLayout);
+        } catch (e) {}
+      }
+
+      this._updateProfileBar();
+      this._updateLoggedInUI();
+
+      document.getElementById("account-logged-out-view")?.classList.add("hidden");
+      document.getElementById("account-logged-in-view")?.classList.remove("hidden");
+    }
+
+    _updateProfileBar() {
+      const p = this.gamerProfile;
+      const nameEl = document.getElementById("gamer-name-display");
+      const summaryEl = document.getElementById("gamer-stats-summary");
+      const badgeEl = document.getElementById("gamer-avatar-badge");
+
+      if (!p) {
+        if (nameEl) nameEl.innerText = "Guest Player";
+        if (summaryEl) summaryEl.innerText = "No account • Stats unsaved";
+        if (badgeEl) badgeEl.innerHTML = "🎮";
+        return;
+      }
+      if (nameEl) nameEl.innerText = p.username;
+      const wins = (p.stats && p.stats.mpWins) || 0;
+      const hs = (p.stats && p.stats.highScore) || 0;
+      if (summaryEl) summaryEl.innerText = `Wins: ${wins} • Score: ${hs}`;
+      if (badgeEl) {
+        if (p.photo) {
+          badgeEl.innerHTML = `<img src="${p.photo}" alt="avatar" style="width:100%;height:100%;object-fit:cover;border-radius:50%;">`;
+        } else {
+          const shapeEmojis = { square: "🟦", circle: "🔵", triangle: "🔺", star: "⭐", diamond: "💎" };
+          badgeEl.innerHTML = shapeEmojis[p.shape] || "🎮";
+        }
+      }
+    }
+
+    _updateLoggedInUI() {
+      const p = this.gamerProfile;
+      if (!p) return;
+      const s = p.stats || {};
+      document.getElementById("logged-username-display")?.setAttribute("", "");
+      const lud = document.getElementById("logged-username-display");
+      if (lud) lud.innerText = p.username;
+
+      document.getElementById("stat-mp-wins") && (document.getElementById("stat-mp-wins").innerText = s.mpWins || 0);
+      document.getElementById("stat-high-score") && (document.getElementById("stat-high-score").innerText = s.highScore || 0);
+      document.getElementById("stat-boss-kills") && (document.getElementById("stat-boss-kills").innerText = s.bossesDefeated || 0);
+      document.getElementById("stat-matches-total") && (document.getElementById("stat-matches-total").innerText = s.totalMatches || 0);
+
+      const avatarEl = document.getElementById("logged-avatar-preview");
+      if (avatarEl) {
+        if (p.photo) {
+          avatarEl.innerHTML = `<img src="${p.photo}" alt="avatar" style="width:100%;height:100%;object-fit:cover;border-radius:12px;">`;
+        } else {
+          const shapeEmojis = { square: "🟦", circle: "🔵", triangle: "🔺", star: "⭐", diamond: "💎" };
+          avatarEl.innerHTML = shapeEmojis[p.shape] || "🎮";
+        }
+      }
+    }
+
+    incrementStat(key) {
+      if (!this.gamerProfile) return;
+      if (!this.gamerProfile.stats) this.gamerProfile.stats = {};
+      this.gamerProfile.stats[key] = (this.gamerProfile.stats[key] || 0) + 1;
+      localStorage.setItem("dodgearena_gamer_profile", JSON.stringify(this.gamerProfile));
+      this._updateLoggedInUI();
+      this._updateProfileBar();
+      const serverUrl = IS_PROD
+        ? "https://dodge-ultimate-arena.onrender.com"
+        : "http://localhost:9000";
+      this.syncProfileToCloud(serverUrl, true /* quiet */).catch(() => {});
+    }
+
+    updateHighScore(score) {
+      if (!this.gamerProfile) return;
+      if (!this.gamerProfile.stats) this.gamerProfile.stats = {};
+      if (score > (this.gamerProfile.stats.highScore || 0)) {
+        this.gamerProfile.stats.highScore = score;
+        localStorage.setItem("dodgearena_gamer_profile", JSON.stringify(this.gamerProfile));
+        this._updateLoggedInUI();
+        this._updateProfileBar();
+      }
+    }
+
+    syncProfileToCloud(serverUrl, quiet = false) {
+      if (!this.gamerProfile) return Promise.resolve();
+      const creds = this._getStoredCreds();
+      if (!creds) return Promise.resolve();
+      const syncEl = document.getElementById("account-sync-status");
+      if (!quiet && syncEl) { syncEl.style.color = "#aaa"; syncEl.innerText = "⏳ Syncing..."; }
+
+      const myPlayer = (this.mode === "CUSTOM_ROOM" && this.myRole === "p2") ? this.p2 : this.p1;
+      return fetch(`${serverUrl}/api/profile/save`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          username: creds.username,
+          pin: creds.pin,
+          shape: myPlayer.customShape || localStorage.getItem("dodgearena_char_shape"),
+          photo: myPlayer.avatarDataUrl || null,
+          hudLayout: (() => {
+            try { return JSON.parse(localStorage.getItem("dodgearena_hud_layout") || "null"); } catch (e) { return null; }
+          })(),
+          stats: this.gamerProfile.stats || {},
+        }),
+      })
+        .then((r) => r.json())
+        .then((data) => {
+          if (!quiet && syncEl) {
+            syncEl.style.color = data.success ? "#00e5ff" : "#ff4455";
+            syncEl.innerText = data.success ? "✅ Cloud synced!" : "❌ Sync failed.";
+            setTimeout(() => { if (syncEl) syncEl.innerText = ""; }, 3000);
+          }
+          if (data.success && data.profile) {
+            this.gamerProfile = data.profile;
+            localStorage.setItem("dodgearena_gamer_profile", JSON.stringify(data.profile));
+          }
+        })
+        .catch(() => {
+          if (!quiet && syncEl) {
+            syncEl.style.color = "#ff4455";
+            syncEl.innerText = "❌ Could not reach server.";
+            setTimeout(() => { if (syncEl) syncEl.innerText = ""; }, 3000);
+          }
+        });
+    }
+
     openHudEditor() {
       document.body.classList.add("hud-editing");
       document.getElementById("modal-overlay")?.classList.add("hidden");
@@ -2094,9 +2340,11 @@
 
     // --- Character Shape & Avatar Customization Methods ---
     setPlayerShape(shape, persist = true) {
-      this.p1.customShape = shape;
-      this.p1.avatarImg = null;
-      this.p1.avatarDataUrl = null;
+      // Fix: always set the ACTIVE player (p2 for guests in multiplayer)
+      const myPlayer = (this.mode === "CUSTOM_ROOM" && this.myRole === "p2") ? this.p2 : this.p1;
+      myPlayer.customShape = shape;
+      myPlayer.avatarImg = null;
+      myPlayer.avatarDataUrl = null;
 
       if (persist) {
         localStorage.setItem("dodgearena_char_shape", shape);
@@ -2126,8 +2374,10 @@
     setPlayerPhoto(dataUrl, persist = true) {
       const img = new Image();
       img.onload = () => {
-        this.p1.avatarImg = img;
-        this.p1.avatarDataUrl = dataUrl;
+        // Fix: always set the ACTIVE player (p2 for guests in multiplayer)
+        const myPlayer = (this.mode === "CUSTOM_ROOM" && this.myRole === "p2") ? this.p2 : this.p1;
+        myPlayer.avatarImg = img;
+        myPlayer.avatarDataUrl = dataUrl;
 
         if (persist) {
           localStorage.setItem("dodgearena_char_photo", dataUrl);
@@ -2310,6 +2560,12 @@
           this.sounds.playVictory();
         } else {
           this.sounds.playGameOver();
+        }
+        // Track stats for guest (p2)
+        if (this.gamerProfile) {
+          this.incrementStat("totalMatches");
+          if (isMeWinner) this.incrementStat("mpWins");
+          else this.incrementStat("mpLosses");
         }
       }
 
@@ -2613,6 +2869,9 @@
       const bx = this.boss.x + this.boss.size / 2;
       const by = this.boss.y + this.boss.size / 2;
 
+      // Track boss kill stat
+      if (this.gamerProfile) this.incrementStat("bossesDefeated");
+
       // Huge explosion
       for (let p = 0; p < 45; p++) {
         this.particles.push(new Particle(bx, by, p % 2 === 0 ? "#ffcc00" : "#ff0044"));
@@ -2693,10 +2952,20 @@
           this.state = "MATCH_OVER";
           this.sounds.playVictory();
           this.broadcastState();
+          // Track stats for host (host = p1)
+          if (this.gamerProfile) {
+            this.incrementStat("totalMatches");
+            this.incrementStat("mpWins"); // host (p1) wins
+          }
         } else if (this.p2Score >= 30) {
           this.state = "MATCH_OVER";
           this.sounds.playVictory();
           this.broadcastState();
+          // Track stats for host (host = p1, so they lost)
+          if (this.gamerProfile) {
+            this.incrementStat("totalMatches");
+            this.incrementStat("mpLosses");
+          }
         }
       }
     }
@@ -3054,6 +3323,8 @@
             this.items.splice(i, 1);
             const highestScore = Math.max(this.p1Score, this.p2Score);
             this.checkProgression(highestScore);
+            // Track solo high score
+            if (this.mode === "SOLO") this.updateHighScore(this.p1Score);
           }
         }
       });
