@@ -1147,7 +1147,7 @@
 
       // Share Buttons
       (() => {
-        const GAME_URL = "https://dodge-arena-ultimate.vercel.app";
+        const GAME_URL = "https://dodge-ultimate-arena.vercel.app";
         const SHARE_TEXT = "🎮 Dodge Arena Ultimate — dodge enemies, battle bosses, play multiplayer! Check it out 👇";
 
         document.getElementById("share-facebook")?.addEventListener("click", () => {
