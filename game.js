@@ -162,17 +162,32 @@
       this._init();
       if (!this.ctx) return;
       const now = this.ctx.currentTime;
-      const osc = this.ctx.createOscillator();
+      // High-tech sci-fi phase-warp sound
+      const osc1 = this.ctx.createOscillator();
+      const osc2 = this.ctx.createOscillator();
       const gain = this.ctx.createGain();
-      osc.type = "triangle";
-      osc.frequency.setValueAtTime(800, now);
-      osc.frequency.exponentialRampToValueAtTime(300, now + 0.3);
-      gain.gain.setValueAtTime(0.3, now);
-      gain.gain.exponentialRampToValueAtTime(0.01, now + 0.3);
-      osc.connect(gain);
+
+      osc1.type = "sawtooth";
+      osc1.frequency.setValueAtTime(320, now);
+      osc1.frequency.exponentialRampToValueAtTime(1200, now + 0.12);
+      osc1.frequency.exponentialRampToValueAtTime(350, now + 0.32);
+
+      osc2.type = "sine";
+      osc2.frequency.setValueAtTime(600, now);
+      osc2.frequency.exponentialRampToValueAtTime(1400, now + 0.08);
+      osc2.frequency.exponentialRampToValueAtTime(250, now + 0.35);
+
+      gain.gain.setValueAtTime(0.35, now);
+      gain.gain.exponentialRampToValueAtTime(0.01, now + 0.35);
+
+      osc1.connect(gain);
+      osc2.connect(gain);
       gain.connect(this.ctx.destination);
-      osc.start(now);
-      osc.stop(now + 0.31);
+
+      osc1.start(now);
+      osc2.start(now);
+      osc1.stop(now + 0.36);
+      osc2.stop(now + 0.36);
     }
 
     playBeam() {
@@ -364,10 +379,68 @@
       return true;
     }
 
-    emergencyDodge() {
+    emergencyDodge(enemies = null) {
       if (this.emerDodges <= 0 || this.emerDodgeTimer > 0 || !this.isAlive) return false;
       this.emerDodges -= 1;
-      this.emerDodgeTimer = 1.2; // 1.2s invulnerability
+      this.emerDodgeTimer = 1.5; // 1.5s invulnerable phase
+      this.speedBuffTimer = 1.5; // 1.5s agility speed boost
+
+      // 1. Instant Phase Warp / Leap (160px in facing or moving direction)
+      let dirX = this.facingX;
+      let dirY = this.facingY;
+      if (Math.abs(dirX) < 0.05 && Math.abs(dirY) < 0.05) {
+        dirX = this.vx !== 0 ? Math.sign(this.vx) : 0;
+        dirY = this.vy !== 0 ? Math.sign(this.vy) : -1;
+      }
+      const len = Math.hypot(dirX, dirY);
+      if (len > 0) {
+        dirX /= len;
+        dirY /= len;
+      } else {
+        dirY = -1;
+      }
+
+      const leapDist = 160;
+      // Spawn vibrant purple warp ghosts along leap path
+      for (let step = 1; step <= 4; step++) {
+        const frac = step / 4;
+        this.trails.push({
+          x: this.x + dirX * leapDist * frac,
+          y: this.y + dirY * leapDist * frac,
+          alpha: 0.85 - frac * 0.15,
+          color: "#c084fc",
+        });
+      }
+
+      this.x += dirX * leapDist;
+      this.y += dirY * leapDist;
+
+      // Keep within arena bounds
+      this.x = Math.max(15, Math.min(SCREEN_WIDTH - this.size - 15, this.x));
+      this.y = Math.max(15, Math.min(SCREEN_HEIGHT - this.size - 15, this.y));
+
+      // 2. Blast back and stun all nearby enemies within 180px
+      if (enemies && Array.isArray(enemies)) {
+        const pcx = this.x + this.size / 2;
+        const pcy = this.y + this.size / 2;
+        for (let i = 0; i < enemies.length; i++) {
+          const e = enemies[i];
+          const ecx = e.x + e.size / 2;
+          const ecy = e.y + e.size / 2;
+          let dx = ecx - pcx;
+          let dy = ecy - pcy;
+          let dist = Math.hypot(dx, dy);
+          if (dist < 180) {
+            if (dist < 10) { dx = 1; dy = 0; dist = 1; }
+            const nx = dx / dist;
+            const ny = dy / dist;
+            e.knockbackVx = nx * 400;
+            e.knockbackVy = ny * 400;
+            e.stunTimer = 1.5;
+          }
+        }
+      }
+
       return true;
     }
 
@@ -630,15 +703,39 @@
         }
       }
 
-      // Emergency Dodge Aura
+      // Emergency Dodge Radiant Forcefield Shield
       if (this.emerDodgeTimer > 0) {
-        ctx.strokeStyle = "#a855f7";
+        ctx.save();
+        const pulse = Math.sin(performance.now() / 70) * 3;
+        const shieldR = this.size / 2 + 10 + pulse;
+
+        // Outer neon radiant aura
+        ctx.strokeStyle = "#c084fc";
+        if (!IS_MOBILE) {
+          ctx.shadowColor = "#a855f7";
+          ctx.shadowBlur = 20;
+        }
         ctx.lineWidth = 3;
-        ctx.shadowColor = "#a855f7";
-        ctx.shadowBlur = 15;
         ctx.beginPath();
-        ctx.arc(this.x + this.size / 2, this.y + this.size / 2, this.size * 1.1, 0, Math.PI * 2);
+        ctx.arc(cx, cy, shieldR, 0, Math.PI * 2);
         ctx.stroke();
+
+        // Inner translucent shield bubble
+        ctx.fillStyle = "rgba(168, 85, 247, 0.28)";
+        ctx.fill();
+
+        // 3 Orbital rotating shield sparks
+        const angle = performance.now() / 140;
+        for (let i = 0; i < 3; i++) {
+          const a = angle + (i * Math.PI * 2 / 3);
+          const sx = cx + Math.cos(a) * shieldR;
+          const sy = cy + Math.sin(a) * shieldR;
+          ctx.fillStyle = "#ffffff";
+          ctx.beginPath();
+          ctx.arc(sx, sy, 3, 0, Math.PI * 2);
+          ctx.fill();
+        }
+        ctx.restore();
       }
 
       // Sprint Aura
@@ -1464,9 +1561,9 @@
 
         // B: Emergency Dodge (3x)
         if (e.code === "KeyB") {
-          if (myPlayer.emergencyDodge()) {
+          if (myPlayer.emergencyDodge(this.enemies)) {
             this.sounds.playEmerDodge();
-            this.floatingTexts.push(new FloatingText(myPlayer.x, myPlayer.y, "EMERGENCY DODGED!", "#a855f7"));
+            this.floatingTexts.push(new FloatingText(myPlayer.x, myPlayer.y, "PHASE DODGED!", "#a855f7"));
             this.updateDodgeBadge(myPlayer.emerDodges);
             if (this.mode === "CUSTOM_ROOM" && !this.isHost && this.conn) this.conn.send({ type: "EMER_DODGE" });
           }
@@ -1698,9 +1795,9 @@
         if (e.cancelable) e.preventDefault();
         this.sounds._init();
         const p = getActivePlayer();
-        if (p.emergencyDodge()) {
+        if (p.emergencyDodge(this.enemies)) {
           this.sounds.playEmerDodge();
-          this.floatingTexts.push(new FloatingText(p.x, p.y, "EMERGENCY DODGED!", "#a855f7"));
+          this.floatingTexts.push(new FloatingText(p.x, p.y, "PHASE DODGED!", "#a855f7"));
           this.updateDodgeBadge(p.emerDodges);
           if (this.mode === "CUSTOM_ROOM" && !this.isHost && this.conn) this.conn.send({ type: "EMER_DODGE" });
         }
@@ -1738,6 +1835,16 @@
     updateDodgeBadge(count) {
       const badge = document.getElementById("dodge-count-badge");
       if (badge) badge.innerText = count;
+      const emerBtn = document.getElementById("emer-dodge-btn");
+      if (emerBtn) {
+        if (count <= 0) {
+          emerBtn.style.opacity = "0.45";
+          emerBtn.style.filter = "grayscale(0.75)";
+        } else {
+          emerBtn.style.opacity = "1";
+          emerBtn.style.filter = "none";
+        }
+      }
     }
 
     setupCanvasScaling() {
@@ -2137,7 +2244,7 @@
               this.triggerShockwave(this.p2);
             }
           } else if (data.type === "EMER_DODGE") {
-            this.p2.emergencyDodge();
+            this.p2.emergencyDodge(this.enemies);
             this.sounds.playEmerDodge();
           } else if (data.type === "BEAM") {
             this.p2.fireBeam(data.tx, data.ty);
