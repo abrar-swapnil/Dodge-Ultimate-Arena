@@ -1568,7 +1568,7 @@
     }
 
     showAnnouncement(title, subtitle) {
-      this.announcement = { title, subtitle, timer: 2.8 };
+      this.announcement = { title, subtitle, timer: 1.8 };
     }
 
     updateHUD() {
