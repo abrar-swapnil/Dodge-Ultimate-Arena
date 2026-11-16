@@ -2067,7 +2067,9 @@
       document.getElementById("btn-logout-account")?.addEventListener("click", () => {
         localStorage.removeItem("dodgearena_gamer_credentials");
         localStorage.removeItem("dodgearena_gamer_profile");
+        localStorage.removeItem("dodgearena_char_photo");
         this.gamerProfile = null;
+        this.setPlayerShape("square", true);
         this._updateProfileBar();
         document.getElementById("account-logged-in-view")?.classList.add("hidden");
         document.getElementById("account-logged-out-view")?.classList.remove("hidden");
@@ -2254,9 +2256,12 @@
               JSON.stringify({ username, pin })
             );
 
-            // Merge server data with local: always take the BEST of each stat and preserve photo
+            // Merge stats ONLY if the local profile belongs to the SAME user!
+            const lowerName = username.toLowerCase();
             const srv = data.profile.stats || {};
-            const loc = (this.gamerProfile && this.gamerProfile.stats) || {};
+            const isSameUser = !!(this.gamerProfile && this.gamerProfile.username &&
+                                  this.gamerProfile.username.toLowerCase() === lowerName);
+            const loc = isSameUser ? (this.gamerProfile.stats || {}) : {};
             const mergedStats = {
               highScore:      Math.max(srv.highScore      || 0, loc.highScore      || 0),
               mpWins:         Math.max(srv.mpWins         || 0, loc.mpWins         || 0),
@@ -2266,15 +2271,21 @@
               soloMaxLevel:   Math.max(srv.soloMaxLevel   || 1, loc.soloMaxLevel   || 1),
               mpMaxLevel:     Math.max(srv.mpMaxLevel     || 1, loc.mpMaxLevel     || 1),
             };
-            const photoVal = data.profile.photo ||
-                             (this.gamerProfile && this.gamerProfile.photo) ||
-                             localStorage.getItem("dodgearena_char_photo") || null;
+
+            // Photo: strictly use account photo; NEVER inherit previous user's photo!
+            let photoVal = data.profile.photo || null;
+            if (!photoVal && isSameUser && this.gamerProfile && this.gamerProfile.photo) {
+              photoVal = this.gamerProfile.photo;
+            }
+
             const mergedProfile = { ...data.profile, photo: photoVal, stats: mergedStats, offline: false };
             this.onLoginSuccess(mergedProfile);
 
-            // If local stats or photo were ahead of server, push merged data to cloud immediately
-            const needsUpload = Object.keys(mergedStats).some(k => mergedStats[k] > (srv[k] || (k.includes('Level') ? 1 : 0))) ||
-                                (!data.profile.photo && photoVal);
+            // If local stats or photo were ahead of server for THIS user, push merged data to cloud
+            const needsUpload = isSameUser && (
+              Object.keys(mergedStats).some(k => mergedStats[k] > (srv[k] || (k.includes('Level') ? 1 : 0))) ||
+              (!data.profile.photo && photoVal)
+            );
             if (needsUpload) {
               const serverUrl = IS_PROD ? "https://dodge-ultimate-arena.onrender.com" : "http://localhost:9000";
               this.syncProfileToCloud(serverUrl, true).catch(() => {});
@@ -2377,8 +2388,10 @@
       if (profile.photo) {
         localStorage.setItem("dodgearena_char_photo", profile.photo);
         this.setPlayerPhoto(profile.photo, false);
-      } else if (profile.shape) {
-        this.setPlayerShape(profile.shape, false);
+      } else {
+        // Account has no custom photo: clear any previous user's photo completely
+        localStorage.removeItem("dodgearena_char_photo");
+        this.setPlayerShape(profile.shape || "square", false);
       }
 
       // Apply saved HUD layout if exists and no local one
@@ -2752,9 +2765,13 @@
       myPlayer.avatarImg = null;
       myPlayer.avatarDataUrl = null;
 
+      localStorage.removeItem("dodgearena_char_photo");
       if (persist) {
         localStorage.setItem("dodgearena_char_shape", shape);
-        localStorage.removeItem("dodgearena_char_photo");
+      }
+      if (this.gamerProfile) {
+        this.gamerProfile.photo = null;
+        this.gamerProfile.shape = shape;
       }
 
       // UI Update
