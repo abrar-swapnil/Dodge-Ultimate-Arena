@@ -418,6 +418,82 @@ html, body {
   #desktop-hint {
     display: none;
   }
+
+  /* Keep top status clean and avoid overlap */
+  #top-bar {
+    padding: 0 8px;
+    top: max(6px, env(safe-area-inset-top));
+  }
+
+  .brand {
+    font-size: 0.95rem;
+  }
+
+  .badge {
+    font-size: 0.65rem;
+    padding: 2px 6px;
+  }
+
+  .icon-btn span {
+    display: none; /* Hide text on phone, keep icon only */
+  }
+
+  .icon-btn {
+    padding: 6px 8px;
+    font-size: 0.9rem;
+  }
+
+  /* Move Multiplayer Banner to Top Right / Compact so it never blocks center arena */
+  #match-banner {
+    top: max(45px, calc(env(safe-area-inset-top) + 38px));
+    padding: 4px 10px;
+    gap: 8px;
+    transform: scale(0.85);
+    transform-origin: top center;
+  }
+
+  .score-num {
+    font-size: 1.05rem;
+  }
+
+  /* Compact Action buttons for easy tapping without overlapping */
+  #mobile-controls {
+    height: 140px;
+    padding: 0 10px max(10px, env(safe-area-inset-bottom));
+  }
+
+  #joystick-zone {
+    width: 110px;
+    height: 110px;
+  }
+
+  #joystick-base {
+    width: 100px;
+    height: 100px;
+  }
+
+  #joystick-knob {
+    width: 42px;
+    height: 42px;
+  }
+
+  #mobile-actions {
+    gap: 6px;
+  }
+
+  .ability-btn {
+    width: 48px;
+    height: 48px;
+    border-width: 1.5px;
+  }
+
+  .btn-icon {
+    font-size: 1.0rem;
+  }
+
+  .btn-text {
+    font-size: 0.48rem;
+  }
 }
 
 /* Modal Overlay & Menu Styling */

@@ -24,6 +24,8 @@
     secure: true,
   } : {}; // empty = PeerJS default public cloud for local dev
 
+  const IS_MOBILE = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0) || window.innerWidth < 768;
+
   const SCREEN_WIDTH = 800;
   const SCREEN_HEIGHT = 600;
 
@@ -518,8 +520,10 @@
 
       // Player Rect
       ctx.save();
-      ctx.shadowColor = this.isGiant ? "#ffcc00" : this.color;
-      ctx.shadowBlur = this.isGiant ? 24 : (this.dashTimer > 0 ? 18 : 10);
+      if (!IS_MOBILE) {
+        ctx.shadowColor = this.isGiant ? "#ffcc00" : this.color;
+        ctx.shadowBlur = this.isGiant ? 24 : (this.dashTimer > 0 ? 18 : 10);
+      }
       ctx.fillStyle = this.isGiant ? "#ffaa00" : (this.dashTimer > 0 ? "#ffffff" : this.color);
       ctx.fillRect(Math.round(this.x), Math.round(this.y), this.size, this.size);
 
@@ -733,10 +737,12 @@
       this.y += (dy / distance) * step;
     }
 
-    draw(ctx, mapTheme) {
+    draw(ctx, mapTheme, isMobile = false) {
       ctx.save();
-      ctx.shadowColor = mapTheme.border;
-      ctx.shadowBlur = 8;
+      if (!isMobile) {
+        ctx.shadowColor = mapTheme.border;
+        ctx.shadowBlur = 8;
+      }
       ctx.fillStyle = mapTheme.border;
       ctx.fillRect(Math.round(this.x), Math.round(this.y), this.size, this.size);
       ctx.restore();
@@ -747,7 +753,7 @@
     constructor(x, y, points = 10) {
       this.x = x;
       this.y = y;
-      this.size = 14;
+      this.size = 20; // Increased from 14 to 20 for clear visibility on mobile
       this.points = points;
     }
 
@@ -760,16 +766,25 @@
       };
     }
 
-    draw(ctx, time) {
+    draw(ctx, time, isMobile = false) {
       const radius = this.size / 2;
       const cx = this.x + radius;
       const cy = this.y + radius;
       const pulse = 1 + Math.sin(time * 6) * 0.15;
 
       ctx.save();
-      ctx.shadowColor = "#46dc82";
-      ctx.shadowBlur = 12;
-      ctx.fillStyle = "#46dc82";
+      if (!isMobile) {
+        ctx.shadowColor = "#46dc82";
+        ctx.shadowBlur = 12;
+      }
+      // Outer bright ring
+      ctx.fillStyle = "#ffffff";
+      ctx.beginPath();
+      ctx.arc(cx, cy, (radius + 2) * pulse, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Inner vibrant green core
+      ctx.fillStyle = "#00ff66";
       ctx.beginPath();
       ctx.arc(cx, cy, radius * pulse, 0, Math.PI * 2);
       ctx.fill();
@@ -1172,7 +1187,7 @@
       // Sprint (Hold to Sprint, 20s Cooldown)
       const sprintBtn = document.getElementById("sprint-btn");
       const onSprintStart = (e) => {
-        e.preventDefault();
+        if (e.cancelable) e.preventDefault();
         this.sounds._init();
         const p = getActivePlayer();
         if (p.startSprint()) {
@@ -1183,22 +1198,21 @@
         }
       };
       const onSprintStop = (e) => {
+        if (e && e.cancelable) e.preventDefault();
         const p = getActivePlayer();
         p.stopSprint();
         sprintBtn?.classList.remove("sprinting");
         if (this.mode === "CUSTOM_ROOM" && !this.isHost && this.conn) this.conn.send({ type: "STOP_SPRINT" });
       };
 
-      sprintBtn?.addEventListener("touchstart", onSprintStart, { passive: false });
-      sprintBtn?.addEventListener("touchend", onSprintStop, { passive: false });
-      sprintBtn?.addEventListener("touchcancel", onSprintStop, { passive: false });
-      sprintBtn?.addEventListener("mousedown", onSprintStart);
-      window.addEventListener("mouseup", onSprintStop);
+      sprintBtn?.addEventListener("pointerdown", onSprintStart);
+      window.addEventListener("pointerup", onSprintStop);
+      window.addEventListener("pointercancel", onSprintStop);
 
       // Dash
       const dashBtn = document.getElementById("dash-btn");
       const handleDash = (e) => {
-        e.preventDefault();
+        if (e.cancelable) e.preventDefault();
         this.sounds._init();
         const p = getActivePlayer();
         if (p.dash()) {
@@ -1206,13 +1220,12 @@
           if (this.mode === "CUSTOM_ROOM" && !this.isHost && this.conn) this.conn.send({ type: "DASH" });
         }
       };
-      dashBtn?.addEventListener("touchstart", handleDash, { passive: false });
-      dashBtn?.addEventListener("click", handleDash);
+      dashBtn?.addEventListener("pointerdown", handleDash);
 
       // Push
       const pushBtn = document.getElementById("push-btn");
       const handlePush = (e) => {
-        e.preventDefault();
+        if (e.cancelable) e.preventDefault();
         this.sounds._init();
         const p = getActivePlayer();
         if (p.shockwave()) {
@@ -1221,13 +1234,12 @@
           if (this.mode === "CUSTOM_ROOM" && !this.isHost && this.conn) this.conn.send({ type: "PUSH" });
         }
       };
-      pushBtn?.addEventListener("touchstart", handlePush, { passive: false });
-      pushBtn?.addEventListener("click", handlePush);
+      pushBtn?.addEventListener("pointerdown", handlePush);
 
       // Emergency Dodge
       const emerBtn = document.getElementById("emer-dodge-btn");
       const handleEmerDodge = (e) => {
-        e.preventDefault();
+        if (e.cancelable) e.preventDefault();
         this.sounds._init();
         const p = getActivePlayer();
         if (p.emergencyDodge()) {
@@ -1237,13 +1249,12 @@
           if (this.mode === "CUSTOM_ROOM" && !this.isHost && this.conn) this.conn.send({ type: "EMER_DODGE" });
         }
       };
-      emerBtn?.addEventListener("touchstart", handleEmerDodge, { passive: false });
-      emerBtn?.addEventListener("click", handleEmerDodge);
+      emerBtn?.addEventListener("pointerdown", handleEmerDodge);
 
       // Beam Cannon (E)
       const beamBtn = document.getElementById("beam-btn");
       const handleBeam = (e) => {
-        e.preventDefault();
+        if (e.cancelable) e.preventDefault();
         this.sounds._init();
         const p = getActivePlayer();
         if (p.isGiant) {
@@ -1259,8 +1270,7 @@
           }
         }
       };
-      beamBtn?.addEventListener("touchstart", handleBeam, { passive: false });
-      beamBtn?.addEventListener("click", handleBeam);
+      beamBtn?.addEventListener("pointerdown", handleBeam);
 
       // Canvas click to restart
       this.canvas.addEventListener("click", () => {
@@ -1296,7 +1306,7 @@
         this.canvas.style.width = `${w}px`;
         this.canvas.style.height = `${h}px`;
 
-        const dpr = Math.min(window.devicePixelRatio || 1, 2);
+        const dpr = IS_MOBILE ? 1 : Math.min(window.devicePixelRatio || 1, 2);
         this.canvas.width = SCREEN_WIDTH * dpr;
         this.canvas.height = SCREEN_HEIGHT * dpr;
         this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -1430,6 +1440,10 @@
       this.p2.isAlive = data.p2.isAlive;
 
       this.enemies = data.enemies.map(e => new Enemy(e.x, e.y, this.difficulty.enemySpeed));
+
+      if (data.items) {
+        this.items = data.items.map(it => new Collectible(it.x, it.y, it.points));
+      }
 
       if (data.boss) {
         if (!this.boss) this.boss = new Boss();
@@ -1755,6 +1769,7 @@
           p1: { x: this.p1.x, y: this.p1.y, isGiant: this.p1.isGiant, size: this.p1.size, activeBeam: this.p1.activeBeam, isAlive: this.p1.isAlive },
           p2: { x: this.p2.x, y: this.p2.y, isGiant: this.p2.isGiant, size: this.p2.size, activeBeam: this.p2.activeBeam, isAlive: this.p2.isAlive },
           enemies: this.enemies.map(e => ({ x: e.x, y: e.y })),
+          items: this.items.map(it => ({ x: it.x, y: it.y, points: it.points })),
           boss: this.boss ? { x: this.boss.x, y: this.boss.y, isChargingBurst: this.boss.isChargingBurst, burstVisual: this.boss.burstVisual } : null,
         });
       }
@@ -1917,12 +1932,12 @@
 
       // Draw Collectibles
       for (let i = 0; i < this.items.length; i++) {
-        this.items[i].draw(ctx, this.gameTime);
+        this.items[i].draw(ctx, this.gameTime, IS_MOBILE);
       }
 
       // Draw Enemies
       for (let i = 0; i < this.enemies.length; i++) {
-        this.enemies[i].draw(ctx, theme);
+        this.enemies[i].draw(ctx, theme, IS_MOBILE);
       }
 
       // Draw Boss
