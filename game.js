@@ -919,6 +919,7 @@
       this.setupKeyboard();
       this.setupTouch();
       this.setupCanvasScaling();
+      this.initUserAndLoadHUD();
     }
 
     // --- DOM Setup ---
@@ -963,6 +964,12 @@
           }
         });
       });
+
+      // Custom HUD Editor Buttons
+      document.getElementById("btn-open-hud-editor")?.addEventListener("click", () => this.openHudEditor());
+      document.getElementById("btn-save-hud")?.addEventListener("click", () => this.saveHudLayout());
+      document.getElementById("btn-reset-hud")?.addEventListener("click", () => this.resetHudLayout());
+      document.getElementById("btn-close-hud")?.addEventListener("click", () => this.closeHudEditor());
 
       // Mode Start Buttons
       document.getElementById("btn-mode-solo")?.addEventListener("click", () => {
@@ -1404,6 +1411,205 @@
       window.addEventListener("resize", resize);
       window.addEventListener("orientationchange", () => setTimeout(resize, 200));
       resize();
+    }
+
+    // --- Custom HUD Layout & Cloud Persistence ---
+    initUserAndLoadHUD() {
+      // Generate or retrieve persistent User ID
+      let uid = localStorage.getItem("dodgearena_user_id");
+      if (!uid) {
+        uid = "user_" + Math.random().toString(36).substring(2, 10);
+        localStorage.setItem("dodgearena_user_id", uid);
+      }
+      this.userId = uid;
+
+      // 1. Try loading from LocalStorage first for instant speed
+      const localLayout = localStorage.getItem("dodgearena_hud_layout");
+      if (localLayout) {
+        try {
+          this.applyHudLayout(JSON.parse(localLayout));
+        } catch (e) {}
+      }
+
+      // 2. Fetch from Cloud Server in background if deployed
+      const serverUrl = IS_PROD ? "https://dodge-ultimate-arena.onrender.com" : "http://localhost:9000";
+      fetch(`${serverUrl}/api/hud-layout/${this.userId}`)
+        .then(res => res.json())
+        .then(data => {
+          if (data && data.success && data.layout) {
+            this.applyHudLayout(data.layout);
+            localStorage.setItem("dodgearena_hud_layout", JSON.stringify(data.layout));
+          }
+        })
+        .catch(() => {});
+    }
+
+    openHudEditor() {
+      document.body.classList.add("hud-editing");
+      document.getElementById("modal-overlay")?.classList.add("hidden");
+      document.getElementById("hud-editor-overlay")?.classList.remove("hidden");
+      this.setupHudDragAndDrop();
+    }
+
+    closeHudEditor() {
+      document.body.classList.remove("hud-editing");
+      document.getElementById("hud-editor-overlay")?.classList.add("hidden");
+      document.getElementById("modal-overlay")?.classList.remove("hidden");
+    }
+
+    setupHudDragAndDrop() {
+      if (this.hudDragInitialized) return;
+      this.hudDragInitialized = true;
+
+      const elementsToDrag = [
+        document.getElementById("joystick-zone"),
+        document.getElementById("sprint-btn"),
+        document.getElementById("dash-btn"),
+        document.getElementById("push-btn"),
+        document.getElementById("emer-dodge-btn"),
+        document.getElementById("beam-btn"),
+      ].filter(Boolean);
+
+      elementsToDrag.forEach((el) => {
+        let isDragging = false;
+        let startX = 0, startY = 0;
+        let origLeft = 0, origTop = 0;
+
+        const onPointerDown = (e) => {
+          if (!document.body.classList.contains("hud-editing")) return;
+          e.preventDefault();
+          e.stopPropagation();
+
+          isDragging = true;
+          startX = e.clientX;
+          startY = e.clientY;
+
+          const rect = el.getBoundingClientRect();
+          origLeft = rect.left;
+          origTop = rect.top;
+
+          // Make element fixed for freeform drag anywhere
+          el.style.position = "fixed";
+          el.style.left = `${origLeft}px`;
+          el.style.top = `${origTop}px`;
+          el.style.bottom = "auto";
+          el.style.right = "auto";
+          el.style.margin = "0";
+          el.setPointerCapture(e.pointerId);
+        };
+
+        const onPointerMove = (e) => {
+          if (!isDragging) return;
+          e.preventDefault();
+          const dx = e.clientX - startX;
+          const dy = e.clientY - startY;
+
+          const newLeft = Math.max(10, Math.min(window.innerWidth - el.offsetWidth - 10, origLeft + dx));
+          const newTop = Math.max(60, Math.min(window.innerHeight - el.offsetHeight - 10, origTop + dy));
+
+          el.style.left = `${newLeft}px`;
+          el.style.top = `${newTop}px`;
+        };
+
+        const onPointerUp = (e) => {
+          if (!isDragging) return;
+          isDragging = false;
+          try { el.releasePointerCapture(e.pointerId); } catch (err) {}
+        };
+
+        el.addEventListener("pointerdown", onPointerDown);
+        el.addEventListener("pointermove", onPointerMove);
+        el.addEventListener("pointerup", onPointerUp);
+        el.addEventListener("pointercancel", onPointerUp);
+      });
+    }
+
+    saveHudLayout() {
+      const ids = ["joystick-zone", "sprint-btn", "dash-btn", "push-btn", "emer-dodge-btn", "beam-btn"];
+      const layout = {};
+
+      ids.forEach((id) => {
+        const el = document.getElementById(id);
+        if (el && el.style.position === "fixed") {
+          layout[id] = {
+            leftPct: (parseFloat(el.style.left) / window.innerWidth) * 100,
+            topPct: (parseFloat(el.style.top) / window.innerHeight) * 100,
+          };
+        }
+      });
+
+      // 1. Save Locally
+      localStorage.setItem("dodgearena_hud_layout", JSON.stringify(layout));
+
+      // 2. Save to Render Cloud Server
+      const serverUrl = IS_PROD ? "https://dodge-ultimate-arena.onrender.com" : "http://localhost:9000";
+      fetch(`${serverUrl}/api/hud-layout`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userId: this.userId, layout }),
+      }).catch(() => {});
+
+      // Feedback to user
+      const statusEl = document.getElementById("hud-save-status");
+      if (statusEl) {
+        statusEl.classList.remove("hidden");
+        setTimeout(() => {
+          statusEl.classList.add("hidden");
+          this.closeHudEditor();
+        }, 1200);
+      } else {
+        this.closeHudEditor();
+      }
+    }
+
+    applyHudLayout(layout) {
+      if (!layout) return;
+      Object.keys(layout).forEach((id) => {
+        const el = document.getElementById(id);
+        const pos = layout[id];
+        if (el && pos && pos.leftPct !== undefined && pos.topPct !== undefined) {
+          el.style.position = "fixed";
+          el.style.left = `${(pos.leftPct / 100) * window.innerWidth}px`;
+          el.style.top = `${(pos.topPct / 100) * window.innerHeight}px`;
+          el.style.bottom = "auto";
+          el.style.right = "auto";
+          el.style.margin = "0";
+        }
+      });
+    }
+
+    resetHudLayout() {
+      localStorage.removeItem("dodgearena_hud_layout");
+      const ids = ["joystick-zone", "sprint-btn", "dash-btn", "push-btn", "emer-dodge-btn", "beam-btn"];
+      ids.forEach((id) => {
+        const el = document.getElementById(id);
+        if (el) {
+          el.style.position = "";
+          el.style.left = "";
+          el.style.top = "";
+          el.style.bottom = "";
+          el.style.right = "";
+          el.style.margin = "";
+        }
+      });
+
+      // Clear on server
+      const serverUrl = IS_PROD ? "https://dodge-ultimate-arena.onrender.com" : "http://localhost:9000";
+      fetch(`${serverUrl}/api/hud-layout`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userId: this.userId, layout: {} }),
+      }).catch(() => {});
+
+      const statusEl = document.getElementById("hud-save-status");
+      if (statusEl) {
+        statusEl.innerText = "Layout reset to default!";
+        statusEl.classList.remove("hidden");
+        setTimeout(() => {
+          statusEl.classList.add("hidden");
+          this.closeHudEditor();
+        }, 1000);
+      }
     }
 
     // --- WebRTC Multiplayer ---

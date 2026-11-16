@@ -156,6 +156,11 @@
           </button>
         </div>
 
+        <!-- Customize HUD Button -->
+        <button id="btn-open-hud-editor" class="btn secondary-btn hud-custom-trigger">
+          ⚙️ <span>CUSTOMIZE TOUCH CONTROLS (HUD)</span>
+        </button>
+
         <!-- Online Room Setup Sub-panel -->
         <div id="online-panel" class="sub-panel hidden">
           <div class="panel-header">
@@ -215,6 +220,22 @@
     <!-- Resume 3-Second Countdown Overlay -->
     <div id="countdown-overlay" class="countdown-backdrop hidden">
       <div id="countdown-number" class="countdown-pop">3</div>
+    </div>
+
+    <!-- Interactive HUD Customizer Editor Overlay -->
+    <div id="hud-editor-overlay" class="hud-editor-backdrop hidden">
+      <div class="hud-editor-header">
+        <div class="hud-editor-title">
+          <span>🖐️ TOUCH CONTROLS CUSTOMIZER</span>
+          <p>Drag any button or joystick to reposition anywhere on your screen.</p>
+        </div>
+        <div class="hud-editor-btns">
+          <button id="btn-save-hud" class="btn primary-btn">💾 SAVE LAYOUT</button>
+          <button id="btn-reset-hud" class="btn small-btn">🔄 RESET DEFAULT</button>
+          <button id="btn-close-hud" class="btn small-btn">❌ CANCEL</button>
+        </div>
+      </div>
+      <div id="hud-save-status" class="hud-save-alert hidden">Layout saved locally & to cloud!</div>
     </div>
   </div>
 
