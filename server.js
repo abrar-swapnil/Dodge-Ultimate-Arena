@@ -87,7 +87,7 @@ function isPinInUse(pin, excludeUsernameKey) {
 app.get("/", (req, res) => {
   res.json({
     status: "ok",
-    service: "Dodge Arena Ultimate — PeerJS, Auth & Cloud Sync Server",
+    service: "Dodgy The Unstoppable — PeerJS, Auth & Cloud Sync Server",
     uptime: Math.floor(process.uptime()) + "s",
     registeredGamers: Object.keys(gamerProfiles).length,
   });

@@ -503,6 +503,136 @@ html, body {
   .btn-text {
     font-size: 0.48rem;
   }
+
+  /* ── Mobile Portrait Menu & Modal Balance ─────────────────── */
+  .modal-backdrop {
+    padding: max(10px, env(safe-area-inset-top)) 10px max(14px, env(safe-area-inset-bottom)) !important;
+    align-items: flex-start !important; /* Never clips top header under status bar */
+    overflow-y: auto !important;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .menu-modal {
+    margin: max(4px, calc(env(safe-area-inset-top) * 0.35)) auto max(16px, env(safe-area-inset-bottom)) !important;
+    padding: 12px 14px 16px !important;
+    gap: 8px !important;
+    max-height: calc(100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 16px) !important;
+    max-height: calc(100vh - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 16px) !important;
+    border-radius: 14px !important;
+  }
+
+  .game-logo {
+    font-size: clamp(1.2rem, 5.2vw, 1.65rem) !important;
+    letter-spacing: 1px !important;
+    line-height: 1.15 !important;
+    margin-bottom: -3px !important;
+  }
+
+  .tagline {
+    font-size: 0.68rem !important;
+    letter-spacing: 1px !important;
+    margin-bottom: 2px !important;
+  }
+
+  .gamer-account-bar {
+    padding: 6px 10px !important;
+    margin: 2px 0 5px 0 !important;
+  }
+
+  .gamer-avatar-badge {
+    width: 32px !important;
+    height: 32px !important;
+    font-size: 1.15rem !important;
+  }
+
+  .gamer-name {
+    font-size: 0.85rem !important;
+  }
+
+  .gamer-summary {
+    font-size: 0.65rem !important;
+  }
+
+  .account-trigger-btn {
+    padding: 4px 8px !important;
+    font-size: 0.68rem !important;
+  }
+
+  .mode-cards {
+    gap: 7px !important;
+  }
+
+  .mode-card {
+    padding: 8px 12px !important;
+    gap: 10px !important;
+    border-radius: 10px !important;
+  }
+
+  .mode-icon {
+    font-size: 1.35rem !important;
+  }
+
+  .mode-info h3 {
+    font-size: 0.85rem !important;
+    margin-bottom: 1px !important;
+  }
+
+  .mode-info p {
+    font-size: 0.68rem !important;
+    line-height: 1.25 !important;
+  }
+
+  .diff-selection-section {
+    gap: 4px !important;
+  }
+
+  .diff-label {
+    font-size: 0.7rem !important;
+  }
+
+  .diff-btn {
+    padding: 5px 2px !important;
+    font-size: 0.68rem !important;
+  }
+
+  .character-custom-section {
+    padding: 7px 10px !important;
+    gap: 5px !important;
+  }
+
+  .char-preview-icon {
+    font-size: 0.75rem !important;
+  }
+
+  .small-btn {
+    padding: 5px 8px !important;
+    font-size: 0.7rem !important;
+  }
+
+  .btn {
+    padding: 7px 10px !important;
+    font-size: 0.76rem !important;
+  }
+
+  .share-section {
+    margin-top: 3px !important;
+    padding-top: 6px !important;
+    gap: 5px !important;
+  }
+
+  .share-label {
+    font-size: 0.66rem !important;
+  }
+
+  .share-btn {
+    width: 32px !important;
+    height: 32px !important;
+  }
+
+  .share-btn svg {
+    width: 14px !important;
+    height: 14px !important;
+  }
 }
 
 /* Modal Overlay & Menu Styling */
@@ -519,7 +649,9 @@ html, body {
   align-items: center;
   justify-content: center;
   z-index: 50;
-  padding: 16px;
+  padding: max(16px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) max(16px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left));
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
   transition: opacity 0.25s ease;
 }
 
@@ -530,12 +662,15 @@ html, body {
   border: 1px solid rgba(70, 130, 255, 0.35);
   box-shadow: 0 15px 50px rgba(0, 0, 0, 0.85), 0 0 30px rgba(70, 130, 255, 0.2);
   border-radius: 16px;
-  padding: 24px;
+  padding: 22px;
   display: flex;
   flex-direction: column;
-  gap: 15px;
-  max-height: 90vh;
+  gap: 14px;
+  max-height: calc(100vh - 32px);
+  max-height: calc(100dvh - 32px);
   overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  margin: auto;
 }
 
 .game-logo {
@@ -1110,15 +1245,15 @@ html, body {
 }
 
 .splash-title {
-  font-size: clamp(2.4rem, 8vw, 4.2rem);
+  font-size: clamp(1.8rem, 6.8vw, 3.8rem);
   font-weight: 900;
-  letter-spacing: 3px;
+  letter-spacing: 2px;
   background: linear-gradient(135deg, #ffffff 0%, #38bdf8 50%, #4f46e5 100%);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   filter: drop-shadow(0 0 35px rgba(56, 189, 248, 0.7));
   margin: 0;
-  line-height: 1.1;
+  line-height: 1.15;
 }
 
 .splash-creator {

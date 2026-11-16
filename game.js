@@ -1247,7 +1247,7 @@
       // Share Buttons
       (() => {
         const GAME_URL = "https://dodge-ultimate-arena.vercel.app";
-        const SHARE_TEXT = "🎮 Dodge Arena Ultimate — dodge enemies, battle bosses, play multiplayer! Check it out 👇";
+        const SHARE_TEXT = "🎮 Dodgy The Unstoppable — dodge enemies, battle bosses, play multiplayer! Check it out 👇";
 
         document.getElementById("share-facebook")?.addEventListener("click", () => {
           window.open(`https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(GAME_URL)}`, "_blank", "width=600,height=500");
@@ -1324,8 +1324,8 @@
         const emailParams = {
           name: payload.name,
           email: payload.email || "Not provided",
-          title: `🎮 Dodge Arena Ultimate — ${payload.type}`,
-          message: `📩 GAME FEEDBACK — Dodge Arena Ultimate\n` +
+          title: `🎮 Dodgy The Unstoppable — ${payload.type}`,
+          message: `📩 GAME FEEDBACK — Dodgy The Unstoppable\n` +
                    `━━━━━━━━━━━━━━━━━━━━━━\n` +
                    `🗂 Type     : ${payload.type}\n` +
                    `👤 Player  : ${payload.name}\n` +
