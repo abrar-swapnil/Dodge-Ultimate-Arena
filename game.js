@@ -668,16 +668,18 @@
 
   // --- Boss Entity (Level 1 Titan Boss) ---
   class Boss {
-    constructor() {
-      this.size = 70;
+    constructor(level = 1) {
+      this.level = level;
+      this.size = level === 1 ? 70 : 85;
       this.x = SCREEN_WIDTH / 2 - this.size / 2;
       this.y = 80;
-      this.vx = 60;
-      this.maxHp = 100;
-      this.hp = 100;
+      this.vx = level === 1 ? 65 : 95;
+      this.maxHp = level === 1 ? 100 : 150;
+      this.hp = this.maxHp;
+      this.isHit = 0; // flash timer when taking damage
 
       // Burst Attack
-      this.burstTimer = 0; // cycles every 8s
+      this.burstTimer = 0; // cycles every 6-8s
       this.isChargingBurst = false;
       this.chargeTimer = 0; // 2s charge
       this.burstRadius = 0;
@@ -687,7 +689,15 @@
       this.minionTimer = 0;
     }
 
+    takeDamage(amount) {
+      this.hp = Math.max(0, this.hp - amount);
+      this.isHit = 0.2;
+      return this.hp <= 0;
+    }
+
     update(dt, onCaution, onBurst, spawnMinions) {
+      if (this.isHit > 0) this.isHit -= dt;
+
       // Horizontal drift
       this.x += this.vx * dt;
       if (this.x < 30 || this.x + this.size > SCREEN_WIDTH - 30) {
@@ -696,14 +706,14 @@
 
       // Minion Spawner
       this.minionTimer += dt;
-      if (this.minionTimer >= 4.5) {
+      if (this.minionTimer >= (this.level === 1 ? 4.2 : 3.2)) {
         this.minionTimer = 0;
         spawnMinions(this.x + this.size / 2, this.y + this.size / 2);
       }
 
       // Burst Attack Cycle
       this.burstTimer += dt;
-      if (!this.isChargingBurst && this.burstTimer >= 6.5) {
+      if (!this.isChargingBurst && this.burstTimer >= (this.level === 1 ? 6.5 : 5.0)) {
         this.isChargingBurst = true;
         this.chargeTimer = 2.0;
         onCaution(true);
@@ -720,14 +730,14 @@
             x: this.x + this.size / 2,
             y: this.y + this.size / 2,
             radius: 10,
-            maxRadius: 260,
+            maxRadius: this.level === 1 ? 260 : 320,
             alpha: 1.0,
           };
         }
       }
 
       if (this.burstVisual) {
-        this.burstVisual.radius += 500 * dt;
+        this.burstVisual.radius += 520 * dt;
         this.burstVisual.alpha -= 2.2 * dt;
         if (this.burstVisual.alpha <= 0) this.burstVisual = null;
       }
@@ -744,7 +754,7 @@
         ctx.strokeStyle = "#ff0055";
         ctx.lineWidth = 3;
         ctx.beginPath();
-        ctx.arc(cx, cy, 30 + pulse * 140, 0, Math.PI * 2);
+        ctx.arc(cx, cy, 30 + pulse * 150, 0, Math.PI * 2);
         ctx.stroke();
         ctx.restore();
       }
@@ -763,9 +773,9 @@
 
       // Giant Boss Body
       ctx.save();
-      ctx.shadowColor = "#ff2244";
+      ctx.shadowColor = this.isHit > 0 ? "#ffffff" : "#ff2244";
       ctx.shadowBlur = 24;
-      ctx.fillStyle = this.isChargingBurst ? "#ffcc00" : "#ff1133";
+      ctx.fillStyle = this.isHit > 0 ? "#ffffff" : (this.isChargingBurst ? "#ffcc00" : (this.level === 1 ? "#ff1133" : "#9900ff"));
       ctx.fillRect(Math.round(this.x), Math.round(this.y), this.size, this.size);
 
       // Boss Core Eye
@@ -774,16 +784,34 @@
       ctx.arc(cx, cy, 14, 0, Math.PI * 2);
       ctx.fill();
 
-      ctx.fillStyle = "#ff0044";
+      ctx.fillStyle = this.level === 1 ? "#ff0044" : "#aa00ff";
       ctx.beginPath();
       ctx.arc(cx, cy, 7, 0, Math.PI * 2);
       ctx.fill();
 
       // Boss Title Tag
+      const bossName = this.level === 1 ? "TITAN VOID BOSS (LVL 1)" : "⚡ OMEGA OVERLORD (FINAL)";
       ctx.fillStyle = "#ffcc00";
       ctx.font = "bold 12px monospace, sans-serif";
       ctx.textAlign = "center";
-      ctx.fillText("TITAN VOID BOSS (LVL 1)", cx, this.y - 10);
+      ctx.fillText(bossName, cx, this.y - 18);
+
+      // Boss Health Bar
+      const barW = this.size + 40;
+      const barH = 7;
+      const barX = cx - barW / 2;
+      const barY = this.y - 12;
+
+      ctx.fillStyle = "rgba(0, 0, 0, 0.75)";
+      ctx.fillRect(barX, barY, barW, barH);
+      ctx.strokeStyle = "#ffffff";
+      ctx.lineWidth = 1;
+      ctx.strokeRect(barX, barY, barW, barH);
+
+      const hpPct = Math.max(0, this.hp / this.maxHp);
+      ctx.fillStyle = hpPct > 0.4 ? "#00ff88" : (hpPct > 0.2 ? "#ffcc00" : "#ff0044");
+      ctx.fillRect(barX, barY, barW * hpPct, barH);
+
       ctx.restore();
     }
   }
@@ -843,11 +871,12 @@
   }
 
   class Collectible {
-    constructor(x, y, points = 10) {
+    constructor(x, y, points = 10, isAttackOrb = false) {
       this.x = x;
       this.y = y;
-      this.size = 20; // Increased from 14 to 20 for clear visibility on mobile
+      this.size = 20;
       this.points = points;
+      this.isAttackOrb = isAttackOrb;
     }
 
     get rect() {
@@ -866,9 +895,12 @@
       const pulse = 1 + Math.sin(time * 6) * 0.15;
 
       ctx.save();
+      const mainColor = this.isAttackOrb ? "#ffcc00" : "#46dc82";
+      const innerColor = this.isAttackOrb ? "#ff9900" : "#00ff66";
+
       if (!isMobile) {
-        ctx.shadowColor = "#46dc82";
-        ctx.shadowBlur = 12;
+        ctx.shadowColor = mainColor;
+        ctx.shadowBlur = 14;
       }
       // Outer bright ring
       ctx.fillStyle = "#ffffff";
@@ -876,11 +908,19 @@
       ctx.arc(cx, cy, (radius + 2) * pulse, 0, Math.PI * 2);
       ctx.fill();
 
-      // Inner vibrant green core
-      ctx.fillStyle = "#00ff66";
+      // Inner vibrant core
+      ctx.fillStyle = innerColor;
       ctx.beginPath();
       ctx.arc(cx, cy, radius * pulse, 0, Math.PI * 2);
       ctx.fill();
+
+      if (this.isAttackOrb) {
+        ctx.fillStyle = "#ffffff";
+        ctx.font = "bold 11px system-ui, sans-serif";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillText("⚡", cx, cy);
+      }
       ctx.restore();
     }
   }
@@ -1999,6 +2039,17 @@
           this.floatingTexts.push(new FloatingText(rcx, rcy, "PUSHED!", "#00e5ff"));
         }
       }
+
+      // Damage Boss if inside shockwave radius!
+      if (this.boss) {
+        const bcx = this.boss.x + this.boss.size / 2;
+        const bcy = this.boss.y + this.boss.size / 2;
+        const distToBoss = Math.hypot(bcx - cx, bcy - cy);
+
+        if (distToBoss < SHOCKWAVE_RADIUS + this.boss.size / 2) {
+          this.damageBoss(20, bcx, bcy);
+        }
+      }
     }
 
     // --- Match & Progression ---
@@ -2093,28 +2144,74 @@
       this.updateDodgeBadge(myPlayer.emerDodges);
     }
 
+    damageBoss(amount, bx, by) {
+      if (!this.boss) return;
+      this.sounds.playPush();
+      this.floatingTexts.push(new FloatingText(bx, by, `-${amount} HP`, "#ff0055"));
+
+      // Blood/Sparks particles
+      for (let p = 0; p < 12; p++) {
+        this.particles.push(new Particle(bx, by, "#ff2244"));
+      }
+
+      const isDead = this.boss.takeDamage(amount);
+      if (isDead) {
+        this.onBossDefeated();
+      }
+    }
+
+    onBossDefeated() {
+      if (!this.boss) return;
+      const bx = this.boss.x + this.boss.size / 2;
+      const by = this.boss.y + this.boss.size / 2;
+
+      // Huge explosion
+      for (let p = 0; p < 45; p++) {
+        this.particles.push(new Particle(bx, by, p % 2 === 0 ? "#ffcc00" : "#ff0044"));
+      }
+
+      this.sounds.playVictory();
+      this.boss = null;
+      this.setCautionBanner(false);
+
+      if (this.level === 1) {
+        // Advance to Level 2
+        this.level = 2;
+        this.mapIndex = 1;
+        this.enemies = []; // clear old enemies
+        this.showAnnouncement("🏆 LEVEL 1 BOSS DEFEATED!", "LEVEL 2: CYBER CORE UNLOCKED (SCORE 250 FOR FINAL BOSS)!");
+        this.p1Score += 50;
+      } else if (this.level === 2) {
+        // Victory! Game Completed!
+        this.level = 3;
+        this.state = "VICTORY";
+        this.showAnnouncement("👑 VICTORY! YOU CONQUERED THE ARENA!", "CONGRATULATIONS! ULTIMATE DODGE CHAMPION!");
+        this.sounds.playVictory();
+      }
+    }
+
     // --- Map Transition & Milestone Checks ---
     checkProgression(score) {
       // 1. Map 2 at 20 points
-      if (score >= 20 && this.mapIndex === 1) {
+      if (score >= 20 && this.mapIndex === 1 && this.level === 1) {
         this.mapIndex = 2;
         this.showAnnouncement("MAP 2 UNLOCKED!", "CRIMSON MAGMA ARENA - ENEMIES AGGRESSIVE!");
         this.sounds.playVictory();
       }
       // 2. Map 3 at 50 points
-      else if (score >= 50 && this.mapIndex === 2) {
+      else if (score >= 50 && this.mapIndex === 2 && this.level === 1) {
         this.mapIndex = 3;
         this.showAnnouncement("MAP 3 UNLOCKED!", "VOID ECLIPSE ABYSS - SPEED INCREASED!");
         this.sounds.playVictory();
       }
       // 3. Map 4 & Boss Fight at 100 points
-      else if (score >= 100 && this.mapIndex === 3) {
+      else if (score >= 100 && this.mapIndex === 3 && this.level === 1 && !this.boss) {
         this.mapIndex = 4;
-        this.boss = new Boss();
-        this.showAnnouncement("BOSS MISSION ARRIVED!", "DEFEAT TITAN VOID BOSS TO ADVANCE!");
+        this.boss = new Boss(1);
+        this.showAnnouncement("👾 BOSS MISSION ARRIVED!", "DESTROY TITAN BOSS WITH PUSH (F) & ATTACK ORBS (⚡)!");
         this.sounds.playWarning();
       }
-      // 4. Level 2 at 120 points
+      // If survived to 120 points without beating boss, auto advance to Level 2
       else if (score >= 120 && this.level === 1) {
         this.level = 2;
         this.mapIndex = 1;
@@ -2122,13 +2219,12 @@
         this.showAnnouncement("LEVEL 2 MATCH STARTED!", "CONGRATULATIONS! CHALLENGE MULTIPLIED!");
         this.sounds.playVictory();
       }
-      // 5. Level 3 at 240 points
-      else if (score >= 240 && this.level === 2) {
-        this.level = 3;
-        this.mapIndex = 1;
-        this.boss = null;
-        this.showAnnouncement("LEVEL 3 MATCH STARTED!", "THE FINAL RUN!");
-        this.sounds.playVictory();
+      // Level 2 Progression -> Final Boss at 250 points
+      else if (this.level === 2 && score >= 250 && !this.boss) {
+        this.mapIndex = 4;
+        this.boss = new Boss(2);
+        this.showAnnouncement("⚠️ FINAL BOSS OVERLORD SPAWNED!", "DEFEAT THE OVERLORD TO WIN THE ARENA!");
+        this.sounds.playWarning();
       }
 
       // Multiplayer 25 points Giant Transformation
@@ -2314,7 +2410,9 @@
       if (this.mapIndex === 2) pts = 15;
       else if (this.mapIndex >= 3) pts = 20;
 
-      this.items.push(new Collectible(x, y, pts));
+      // In Boss fight: spawn ⚡ Golden Attack Orbs
+      const isAttackOrb = Boolean(this.boss);
+      this.items.push(new Collectible(x, y, pts, isAttackOrb));
     }
 
     checkCollisions() {
@@ -2391,7 +2489,16 @@
             this.floatingTexts.push(new FloatingText(item.x, item.y, `+${item.points}`, "#46dc82"));
 
             for (let p = 0; p < 10; p++) {
-              this.particles.push(new Particle(item.x + 7, item.y + 7, "#46dc82"));
+              this.particles.push(new Particle(item.x + 7, item.y + 7, item.isAttackOrb ? "#ffcc00" : "#46dc82"));
+            }
+
+            // If Attack Orb collected during Boss fight: fire energy missile at Boss!
+            if (item.isAttackOrb && this.boss) {
+              const bcx = this.boss.x + this.boss.size / 2;
+              const bcy = this.boss.y + this.boss.size / 2;
+              this.damageBoss(25, bcx, bcy);
+              this.sounds.playDash();
+              this.floatingTexts.push(new FloatingText(player.x, player.y, "⚡ ORB BLAST -25 HP!", "#ffcc00"));
             }
 
             this.items.splice(i, 1);
@@ -2492,7 +2599,7 @@
       }
 
       // Match Over Screen
-      if (this.state === "MATCH_OVER") {
+      if (this.state === "MATCH_OVER" || this.state === "VICTORY") {
         this.drawMatchOverScreen();
       }
     }
@@ -2505,7 +2612,15 @@
 
       ctx.textAlign = "center";
 
-      if (this.mode === "SOLO") {
+      if (this.state === "VICTORY") {
+        ctx.fillStyle = "#ffcc00";
+        ctx.font = "bold 50px monospace, sans-serif";
+        ctx.fillText("👑 ARENA CONQUERED!", SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2 - 50);
+
+        ctx.fillStyle = "#00ff88";
+        ctx.font = "bold 26px monospace, sans-serif";
+        ctx.fillText(`ALL BOSSES DEFEATED! Final Score: ${this.p1Score}`, SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2 + 10);
+      } else if (this.mode === "SOLO") {
         ctx.fillStyle = "#ff3344";
         ctx.font = "bold 48px monospace, sans-serif";
         ctx.fillText("RUN OVER", SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2 - 40);
