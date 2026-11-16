@@ -1934,6 +1934,12 @@
         ? "https://dodge-ultimate-arena.onrender.com"
         : "http://localhost:9000";
 
+      // Warm up Render free-tier server in background immediately on page load
+      // so it's awake by the time the user clicks login
+      if (IS_PROD) {
+        fetch(`${serverUrl}/`, { method: "GET" }).catch(() => {});
+      }
+
       // Open / close modal
       document.getElementById("btn-open-account-modal")?.addEventListener("click", () => {
         document.getElementById("account-modal-overlay")?.classList.remove("hidden");
@@ -1991,17 +1997,30 @@
       return null;
     }
 
-    _doLogin(username, pin, serverUrl, silent) {
+    _doLogin(username, pin, serverUrl, silent, attempt) {
+      attempt = attempt || 1;
+      const MAX_ATTEMPTS = 3;
       const msgEl = document.getElementById("account-status-msg");
+
+      // Show warm-up message on first attempt (Render free tier cold start ~15s)
+      if (!silent && msgEl && attempt === 1) {
+        msgEl.style.color = "#aaa";
+        msgEl.innerText = "⏳ Connecting... (server may take ~15s to wake up)";
+      }
+
+      // Use AbortController to enforce a generous timeout (35s)
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 35000);
+
       return fetch(`${serverUrl}/api/auth/login-or-register`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ username, pin }),
+        signal: controller.signal,
       })
-        .then((r) => r.json())
+        .then((r) => { clearTimeout(timeoutId); return r.json(); })
         .then((data) => {
           if (data && data.success && data.profile) {
-            // Save credentials
             localStorage.setItem(
               "dodgearena_gamer_credentials",
               JSON.stringify({ username, pin })
@@ -2020,10 +2039,23 @@
             }
           }
         })
-        .catch(() => {
-          if (!silent && msgEl) {
-            msgEl.style.color = "#ff4455";
-            msgEl.innerText = "❌ Could not connect to server. Try again later.";
+        .catch((err) => {
+          clearTimeout(timeoutId);
+          // Auto-retry up to MAX_ATTEMPTS on network/timeout errors
+          if (attempt < MAX_ATTEMPTS) {
+            const nextAttempt = attempt + 1;
+            if (!silent && msgEl) {
+              msgEl.style.color = "#ffaa00";
+              msgEl.innerText = `⏳ Server waking up... retrying (${nextAttempt}/${MAX_ATTEMPTS})`;
+            }
+            setTimeout(() => {
+              this._doLogin(username, pin, serverUrl, silent, nextAttempt);
+            }, 5000);
+          } else {
+            if (!silent && msgEl) {
+              msgEl.style.color = "#ff4455";
+              msgEl.innerText = "❌ Server is offline. Please try again in a minute.";
+            }
           }
         });
     }
