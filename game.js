@@ -1145,6 +1145,37 @@
         document.getElementById("rules-modal-overlay")?.classList.add("hidden");
       });
 
+      // Share Buttons
+      (() => {
+        const GAME_URL = "https://dodge-arena-ultimate.vercel.app";
+        const SHARE_TEXT = "🎮 Dodge Arena Ultimate — dodge enemies, battle bosses, play multiplayer! Check it out 👇";
+
+        document.getElementById("share-facebook")?.addEventListener("click", () => {
+          window.open(`https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(GAME_URL)}`, "_blank", "width=600,height=500");
+        });
+
+        document.getElementById("share-whatsapp")?.addEventListener("click", () => {
+          const isMobile = /Mobi|Android/i.test(navigator.userAgent);
+          const base = isMobile ? "https://wa.me/" : "https://web.whatsapp.com/send";
+          window.open(`${base}?text=${encodeURIComponent(SHARE_TEXT + "\n" + GAME_URL)}`, "_blank");
+        });
+
+        document.getElementById("share-twitter")?.addEventListener("click", () => {
+          window.open(`https://twitter.com/intent/tweet?text=${encodeURIComponent(SHARE_TEXT)}&url=${encodeURIComponent(GAME_URL)}`, "_blank", "width=600,height=450");
+        });
+
+        document.getElementById("share-copy-link")?.addEventListener("click", () => {
+          navigator.clipboard.writeText(GAME_URL).then(() => {
+            const toast = document.getElementById("share-copy-toast");
+            if (!toast) return;
+            toast.classList.remove("hidden");
+            setTimeout(() => toast.classList.add("hidden"), 2000);
+          }).catch(() => {
+            prompt("Copy this link:", GAME_URL);
+          });
+        });
+      })();
+
       // Feedback & Bug Report Modal Open / Close
       document.getElementById("btn-open-feedback-modal")?.addEventListener("click", () => {
         document.getElementById("feedback-modal-overlay")?.classList.remove("hidden");
