@@ -1,18 +1,15 @@
 /**
  * Dodge Arena Ultimate — PeerJS Signaling Server
  * Deploy on Render (free tier) as a Node.js web service.
- * 
- * This server handles WebRTC peer discovery & room signaling only.
- * Actual game data travels P2P (browser-to-browser) via WebRTC DataChannel.
  */
 
-const { PeerServer } = require("peer");
+const { PeerServer } = require("@peerjs/server");
 const express = require("express");
 
 const app = express();
 const PORT = process.env.PORT || 9000;
 
-// ── Health check endpoint (Render needs this to verify service is up) ──
+// Health check
 app.get("/", (req, res) => {
   res.json({
     status: "ok",
@@ -25,21 +22,14 @@ app.get("/health", (req, res) => {
   res.json({ status: "healthy" });
 });
 
-// ── PeerJS Server mounted at /peerjs path ──
+// PeerJS Server
 const peerServer = PeerServer({
   port: PORT,
   path: "/peerjs",
-  allow_discovery: false,          // don't expose peer list publicly
-  proxied: true,                   // behind Render's reverse proxy
-  alive_timeout: 60000,            // 60s keep-alive
-  key: "dodge-arena",              // optional namespace key
+  proxied: true,
+  key: "dodge-arena",
   corsOptions: {
-    origin: [
-      "https://dodge-arena.vercel.app",   // your Vercel domain (update this!)
-      "http://localhost:8080",             // local dev
-      "http://localhost:3000",
-      /\.vercel\.app$/,                   // any vercel preview deploy
-    ],
+    origin: "*",
     methods: ["GET", "POST"],
   },
 });
@@ -53,4 +43,3 @@ peerServer.on("disconnect", (client) => {
 });
 
 console.log(`✅ Dodge Arena PeerJS server running on port ${PORT}`);
-console.log(`   Signaling endpoint: ws://0.0.0.0:${PORT}/peerjs`);
