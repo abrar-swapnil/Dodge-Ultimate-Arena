@@ -1671,6 +1671,11 @@
       this.mpConnections = new Map();   // peerId -> { reliable, unreliable }
       this.lobbyIsReady = false;        // this client's ready state
 
+      // Multiplayer Match State (Milestone 3)
+      this.mpState = null;              // null when no MP match; MPMatchState when active
+      this.mpSnapshotTimer = 0;         // accumulator for 25Hz snapshot broadcast
+      this.mpInputTimer = 0;            // accumulator for 30Hz input send
+
       this.gamerProfile = null; // null = guest, object = logged-in profile
       this.setupDOM();
       this.setupKeyboard();
@@ -4079,6 +4084,36 @@
       }
     }
 
+    // Reliable broadcast across all connected peers
+    _broadcastReliable(msg) {
+      if (!this.isHost) return;
+      for (const [, conn] of this.mpConnections) {
+        if (conn.reliable && conn.reliable.open) {
+          try { conn.reliable.send(msg); } catch (e) {}
+        }
+      }
+    }
+
+    // Unreliable / fast snapshot broadcast (uses sync channel if open, else fallback to cmd)
+    _broadcastUnreliable(msg) {
+      if (!this.isHost) return;
+      for (const [, conn] of this.mpConnections) {
+        const ch = (conn.unreliable && conn.unreliable.open) ? conn.unreliable : conn.reliable;
+        if (ch && ch.open) {
+          try { ch.send(msg); } catch (e) {}
+        }
+      }
+    }
+
+    // Send reliable message to host (guest only)
+    _sendReliableToHost(msg) {
+      for (const [, conn] of this.mpConnections) {
+        if (conn.reliable && conn.reliable.open) {
+          try { conn.reliable.send(msg); } catch (e) {}
+        }
+      }
+    }
+
     // Send this client's ready toggle to host (guest)
     async _lobbyToggleReady() {
       this.lobbyIsReady = !this.lobbyIsReady;
@@ -4131,12 +4166,11 @@
       this._hideLobbyAndStartGame();
     }
 
-    // Triggered on guest by host START message
+    // Triggered on guest by host START message or host starting match
     _hideLobbyAndStartGame() {
       document.getElementById("lobby-overlay")?.classList.add("hidden");
-      // For now: kick off the legacy CUSTOM_ROOM match flow with existing host/conn references
-      // Full gameplay sync is Milestone 3+. Lobby foundation complete here.
       this._setLobbyStatus("");
+      this.initMPMatch(this.lobbyMode || "ELITE");
       this.startMatch("CUSTOM_ROOM");
     }
 
@@ -4310,9 +4344,11 @@
         // Also set legacy conn for backward-compat with existing game code
         this.conn = reliable;
 
-        // 4. Listen for host messages
+        // 4. Listen for host messages on both reliable and unreliable channels
         reliable.on("data", (msg) => this._handleLobbyMessage(msg, hostPeerId));
         reliable.on("close", () => this._handlePeerDisconnect(hostPeerId));
+        unreliable.on("data", (msg) => this._handleLobbyMessage(msg, hostPeerId));
+        unreliable.on("close", () => this._handlePeerDisconnect(hostPeerId));
 
         // Announce self to host
         reliable.send({ type: "PLAYER_JOIN", peerId: myPeerId, ...me });
@@ -4383,6 +4419,77 @@
           this._hideLobbyAndStartGame();
           break;
 
+        case "MP_MATCH_START":
+          if (!this.isHost) {
+            this.handleMPMatchStart(msg);
+          }
+          break;
+
+        case "MP_INPUT":
+          if (this.isHost && this.mpState) {
+            const senderId = msg.peerId || fromPeerId;
+            const p = this.mpState.players.get(senderId);
+            if (p && p.isAlive && !p.isSpectator) {
+              if (msg.seq && p.lastInputSeq && msg.seq < p.lastInputSeq) return;
+              p.lastInputSeq = msg.seq || (p.lastInputSeq + 1);
+              p.input.x = Math.max(-1, Math.min(1, Number(msg.x) || 0));
+              p.input.y = Math.max(-1, Math.min(1, Number(msg.y) || 0));
+              p.input.sprint = !!msg.sprint;
+            }
+          }
+          break;
+
+        case "MP_SNAPSHOT":
+          if (!this.isHost && this.mpState) {
+            this.mpApplySnapshot(msg);
+          }
+          break;
+
+        case "MP_DAMAGE":
+          if (this.mpState) {
+            if (msg.eventId && this.mpState.processedEvents.has(msg.eventId)) return;
+            if (msg.eventId) this.mpState.processedEvents.add(msg.eventId);
+            const target = this.mpState.players.get(msg.targetId);
+            if (target) {
+              target.hp = Math.max(0, msg.remainingHp !== undefined ? msg.remainingHp : (target.hp - msg.amount));
+              this.floatingTexts.push(new FloatingText(target.x, target.y - 10, `-${msg.amount} HP`, "#ef4444"));
+            }
+          }
+          break;
+
+        case "MP_ELIMINATED":
+          if (this.mpState) {
+            if (msg.eventId && this.mpState.processedEvents.has(msg.eventId)) return;
+            if (msg.eventId) this.mpState.processedEvents.add(msg.eventId);
+            const target = this.mpState.players.get(msg.targetId);
+            if (target) {
+              target.hp = 0;
+              target.isAlive = false;
+              target.isSpectator = true;
+              this.floatingTexts.push(new FloatingText(target.x, target.y - 15, "💀 ELIMINATED!", "#ff2266"));
+              const myId = this.peer?.id;
+              if (target.id === myId) {
+                this.showAnnouncement("💀 ELIMINATED", "YOU ARE NOW SPECTATING");
+              }
+            }
+          }
+          break;
+
+        case "MP_PLAYER_LEFT":
+          if (this.mpState) {
+            const p = this.mpState.players.get(msg.peerId);
+            const name = msg.name || (p ? p.name : "A player");
+            this.mpState.players.delete(msg.peerId);
+            this.floatingTexts.push(new FloatingText(SCREEN_WIDTH / 2, 80, `👋 ${name} left match`, "#94a3b8"));
+          }
+          break;
+
+        case "MP_PUSH":
+          if (this.isHost && this.mpState) {
+            this.mpHandlePush(msg.casterId || fromPeerId, msg.cx, msg.cy);
+          }
+          break;
+
         // Legacy connection handling (for backwards compat with 2-player mode)
         default:
           if (this.state === "PLAYING") this._handleGameplayMessage(msg);
@@ -4390,8 +4497,29 @@
       }
     }
 
-    // Handle peer disconnect in lobby
+    // Handle peer disconnect in lobby or active match
     _handlePeerDisconnect(peerId) {
+      if (this.mpState && this.mpState.status === "PLAYING") {
+        if (this.isHost) {
+          const player = this.mpState.players.get(peerId);
+          const name = player?.name || "A player";
+          this.mpState.players.delete(peerId);
+          this.mpConnections.delete(peerId);
+          this._broadcastReliable({ type: "MP_PLAYER_LEFT", peerId, name });
+          this.floatingTexts.push(new FloatingText(SCREEN_WIDTH / 2, 80, `👋 ${name} disconnected`, "#94a3b8"));
+          fetch(`${this._serverBase()}/api/rooms/leave`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ roomCode: this.lobbyRoomCode, peerId }),
+          }).catch(() => {});
+          return;
+        } else {
+          // Host disconnected during active match
+          this._handleHostDisconnectDuringMatch();
+          return;
+        }
+      }
+
       const player = this.lobbyPlayers.get(peerId);
       const name = player?.name || "A player";
       this.lobbyPlayers.delete(peerId);
@@ -4416,10 +4544,448 @@
 
     // Route legacy gameplay WebRTC messages (from setupOnlineConnection)
     _handleGameplayMessage(msg) {
-      // Delegate to existing handler if connection is still the legacy conn
       if (this.conn && this.conn.open) {
-        // The existing setupOnlineConnection data handler is already attached
-        // This is a no-op — legacy path handles its own events
+        // Legacy 2-player events
+      }
+    }
+
+    // ══════════════════════════════════════════════════════════════
+    // MULTIPLAYER CORE (2–8 PLAYERS) — Milestone 3
+    // Health, damage, sync, spectators, authoritative host
+    // ══════════════════════════════════════════════════════════════
+
+    initMPMatch(mode) {
+      const matchId = this.lobbyRoomCode || ("match_" + Date.now());
+      const hostId = this.isHost ? (this.peer?.id || "host") : (this.hostPeerId || "host");
+      
+      this.mpState = {
+        matchId: matchId,
+        status: "PLAYING",
+        hostId: hostId,
+        mode: mode || "ELITE",
+        players: new Map(),
+        processedEvents: new Set(),
+        seq: 0,
+        startTime: Date.now()
+      };
+
+      const SPAWN_POINTS = [
+        { x: 120, y: 150 },
+        { x: 680, y: 150 },
+        { x: 120, y: 450 },
+        { x: 680, y: 450 },
+        { x: 400, y: 130 },
+        { x: 400, y: 470 },
+        { x: 220, y: 300 },
+        { x: 580, y: 300 }
+      ];
+
+      const COLORS = [
+        "#00e5ff", "#ff2266", "#ffe600", "#00ff88",
+        "#ff00ea", "#ff8800", "#b347ff", "#00ffea"
+      ];
+
+      let playerList = Array.from(this.lobbyPlayers.entries());
+      if (playerList.length === 0) {
+        playerList = [
+          [this.isHost ? (this.peer?.id || "host") : "host", { name: this.p1.name || "Host", shape: "square", isHost: true }],
+          [!this.isHost ? (this.peer?.id || "guest") : "guest", { name: this.p2.name || "Guest", shape: "circle", isHost: false }]
+        ];
+      }
+
+      let idx = 0;
+      for (const [peerId, pInfo] of playerList) {
+        const pt = SPAWN_POINTS[idx % SPAWN_POINTS.length];
+        const color = COLORS[idx % COLORS.length];
+        const isSelf = this.peer ? (peerId === this.peer.id) : (idx === 0 && this.isHost);
+        
+        const playerObj = {
+          id: peerId,
+          name: pInfo.name || `Player ${idx + 1}`,
+          shape: pInfo.shape || "square",
+          photo: pInfo.photo || null,
+          color: color,
+          isHost: !!pInfo.isHost,
+          x: pt.x,
+          y: pt.y,
+          vx: 0,
+          vy: 0,
+          facingX: 1,
+          facingY: 0,
+          hp: 100,
+          maxHp: 100,
+          isAlive: true,
+          isSpectator: false,
+          isDashing: false,
+          input: { x: 0, y: 0, sprint: false },
+          lastInputSeq: 0,
+          isSelf: isSelf
+        };
+
+        this.mpState.players.set(peerId, playerObj);
+        idx++;
+      }
+
+      const myId = this.peer?.id;
+      const myObj = myId ? this.mpState.players.get(myId) : (this.isHost ? this.mpState.players.values().next().value : null);
+      if (myObj) {
+        this.p1.x = myObj.x;
+        this.p1.y = myObj.y;
+        this.p1.color = myObj.color;
+      }
+
+      if (this.isHost) {
+        const startMsg = {
+          type: "MP_MATCH_START",
+          matchId: matchId,
+          hostId: hostId,
+          mode: mode,
+          players: Array.from(this.mpState.players.values()).map(p => ({
+            id: p.id,
+            name: p.name,
+            shape: p.shape,
+            photo: p.photo,
+            color: p.color,
+            isHost: p.isHost,
+            x: p.x,
+            y: p.y,
+            hp: p.hp,
+            maxHp: p.maxHp,
+            isAlive: p.isAlive,
+            isSpectator: p.isSpectator
+          }))
+        };
+        this._broadcastReliable(startMsg);
+      }
+    }
+
+    handleMPMatchStart(msg) {
+      this.mpState = {
+        matchId: msg.matchId,
+        status: "PLAYING",
+        hostId: msg.hostId,
+        mode: msg.mode || "ELITE",
+        players: new Map(),
+        processedEvents: new Set(),
+        seq: 0,
+        startTime: Date.now()
+      };
+
+      if (Array.isArray(msg.players)) {
+        for (const sp of msg.players) {
+          this.mpState.players.set(sp.id, {
+            id: sp.id,
+            name: sp.name,
+            shape: sp.shape,
+            photo: sp.photo,
+            color: sp.color,
+            isHost: sp.isHost,
+            x: sp.x,
+            y: sp.y,
+            vx: 0,
+            vy: 0,
+            facingX: 1,
+            facingY: 0,
+            hp: sp.hp !== undefined ? sp.hp : 100,
+            maxHp: sp.maxHp || 100,
+            isAlive: sp.isAlive !== undefined ? sp.isAlive : true,
+            isSpectator: sp.isSpectator || false,
+            input: { x: 0, y: 0, sprint: false },
+            lastInputSeq: 0
+          });
+        }
+      }
+
+      const myId = this.peer?.id;
+      const myObj = myId ? this.mpState.players.get(myId) : null;
+      if (myObj) {
+        this.p1.x = myObj.x;
+        this.p1.y = myObj.y;
+        this.p1.color = myObj.color;
+      }
+    }
+
+    mpBroadcastSnapshot() {
+      if (!this.isHost || !this.mpState) return;
+      this.mpState.seq = (this.mpState.seq || 0) + 1;
+      const snapshot = {
+        type: "MP_SNAPSHOT",
+        seq: this.mpState.seq,
+        time: Date.now(),
+        players: Array.from(this.mpState.players.values()).map(p => ({
+          id: p.id,
+          x: Math.round(p.x * 10) / 10,
+          y: Math.round(p.y * 10) / 10,
+          vx: Math.round(p.vx * 10) / 10,
+          vy: Math.round(p.vy * 10) / 10,
+          hp: p.hp,
+          isAlive: p.isAlive,
+          isSpectator: p.isSpectator,
+          facingX: Math.round(p.facingX * 100) / 100,
+          facingY: Math.round(p.facingY * 100) / 100
+        }))
+      };
+      this._broadcastUnreliable(snapshot);
+    }
+
+    mpApplySnapshot(msg) {
+      if (!this.mpState) return;
+      if (msg.seq && this.mpLastSnapshotSeq && msg.seq <= this.mpLastSnapshotSeq) return;
+      this.mpLastSnapshotSeq = msg.seq || 0;
+
+      const myId = this.peer?.id;
+      if (Array.isArray(msg.players)) {
+        for (const sp of msg.players) {
+          let p = this.mpState.players.get(sp.id);
+          if (!p) {
+            p = {
+              id: sp.id,
+              name: sp.name || "Player",
+              shape: sp.shape || "square",
+              photo: sp.photo || null,
+              color: sp.color || "#00e5ff",
+              x: sp.x,
+              y: sp.y,
+              vx: sp.vx || 0,
+              vy: sp.vy || 0,
+              facingX: sp.facingX || 1,
+              facingY: sp.facingY || 0,
+              hp: sp.hp !== undefined ? sp.hp : 100,
+              maxHp: 100,
+              isAlive: sp.isAlive !== undefined ? sp.isAlive : true,
+              isSpectator: sp.isSpectator || false,
+              input: { x: 0, y: 0, sprint: false },
+              lastInputSeq: 0
+            };
+            this.mpState.players.set(sp.id, p);
+          }
+
+          p.hp = sp.hp !== undefined ? sp.hp : p.hp;
+          p.isAlive = sp.isAlive !== undefined ? sp.isAlive : p.isAlive;
+          p.isSpectator = sp.isSpectator || false;
+          p.facingX = sp.facingX !== undefined ? sp.facingX : p.facingX;
+          p.facingY = sp.facingY !== undefined ? sp.facingY : p.facingY;
+
+          if (sp.id === myId) {
+            const dist = Math.hypot(this.p1.x - sp.x, this.p1.y - sp.y);
+            if (dist > 25 || (dist > 0.05 && Math.abs(this.p1Input.x) < 0.05 && Math.abs(this.p1Input.y) < 0.05)) {
+              this.p1.x = sp.x;
+              this.p1.y = sp.y;
+              p.x = sp.x;
+              p.y = sp.y;
+            }
+          } else {
+            p.vx = sp.vx || 0;
+            p.vy = sp.vy || 0;
+            p.x = sp.x;
+            p.y = sp.y;
+          }
+        }
+      }
+    }
+
+    mpApplyDamage(targetId, amount, sourceId, explicitEventId) {
+      if (!this.isHost || !this.mpState) return false;
+      const target = this.mpState.players.get(targetId);
+      if (!target || !target.isAlive || target.isSpectator) return false;
+
+      const eventId = explicitEventId || `dmg_${targetId}_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;
+      if (this.mpState.processedEvents.has(eventId)) return false; // Dedup
+      this.mpState.processedEvents.add(eventId);
+
+      target.hp = Math.max(0, target.hp - amount);
+      this.floatingTexts.push(new FloatingText(target.x, target.y - 10, `-${amount} HP`, "#ef4444"));
+
+      this._broadcastReliable({
+        type: "MP_DAMAGE",
+        eventId: eventId,
+        targetId: targetId,
+        amount: amount,
+        remainingHp: target.hp,
+        sourceId: sourceId
+      });
+
+      if (target.hp <= 0) {
+        this.mpEliminatePlayer(targetId, sourceId);
+      }
+      return true;
+    }
+
+    mpEliminatePlayer(targetId, killerId) {
+      if (!this.isHost || !this.mpState) return false;
+      const target = this.mpState.players.get(targetId);
+      if (!target) return false;
+
+      const elimEventId = `elim_${targetId}_${Date.now()}`;
+      if (this.mpState.processedEvents.has(elimEventId)) return false; // Dedup
+      this.mpState.processedEvents.add(elimEventId);
+
+      target.hp = 0;
+      target.isAlive = false;
+      target.isSpectator = true;
+      this.floatingTexts.push(new FloatingText(target.x, target.y - 15, "💀 ELIMINATED!", "#ff2266"));
+
+      this._broadcastReliable({
+        type: "MP_ELIMINATED",
+        eventId: elimEventId,
+        targetId: targetId,
+        killerId: killerId
+      });
+
+      const myId = this.peer?.id;
+      if (target.id === myId) {
+        this.showAnnouncement("💀 ELIMINATED", "YOU ARE NOW SPECTATING");
+      }
+      return true;
+    }
+
+    mpHandlePush(casterId, cx, cy) {
+      if (!this.isHost || !this.mpState) return;
+      const caster = this.mpState.players.get(casterId);
+      if (!caster || !caster.isAlive || caster.isSpectator) return;
+
+      const originX = cx !== undefined ? cx : (caster.x + PLAYER_SIZE / 2);
+      const originY = cy !== undefined ? cy : (caster.y + PLAYER_SIZE / 2);
+
+      for (const [targetId, p] of this.mpState.players) {
+        if (targetId === casterId || !p.isAlive || p.isSpectator) continue;
+        const pcx = p.x + PLAYER_SIZE / 2;
+        const pcy = p.y + PLAYER_SIZE / 2;
+        const dx = pcx - originX;
+        const dy = pcy - originY;
+        const dist = Math.hypot(dx, dy);
+
+        if (dist < SHOCKWAVE_RADIUS) {
+          const force = (1 - dist / SHOCKWAVE_RADIUS) * 500 + 200;
+          const nx = dist > 0 ? (dx / dist) : 1;
+          const ny = dist > 0 ? (dy / dist) : 0;
+          p.x += nx * force * 0.05;
+          p.y += ny * force * 0.05;
+          p.x = Math.max(0, Math.min(SCREEN_WIDTH - PLAYER_SIZE, p.x));
+          p.y = Math.max(0, Math.min(SCREEN_HEIGHT - PLAYER_SIZE, p.y));
+
+          // Pushing in MP deals 20 damage
+          this.mpApplyDamage(targetId, 20, casterId);
+        }
+      }
+    }
+
+    _handleHostDisconnectDuringMatch() {
+      if (this.state === "PLAYING") {
+        this.state = "MENU";
+        this.mpState = null;
+        this.showAnnouncement("HOST DISCONNECTED", "MATCH TERMINATED");
+        setTimeout(() => {
+          this._lobbyLeave();
+        }, 1500);
+      }
+    }
+
+    drawMPPlayers(ctx) {
+      if (!this.mpState) return;
+
+      const myId = this.peer?.id;
+      let localIsSpectator = false;
+
+      for (const p of this.mpState.players.values()) {
+        const isSelf = myId ? (p.id === myId) : (p.isHost && this.isHost);
+        if (isSelf && (!p.isAlive || p.isSpectator)) {
+          localIsSpectator = true;
+        }
+
+        ctx.save();
+
+        if (!p.isAlive || p.isSpectator) {
+          ctx.globalAlpha = 0.35;
+          ctx.fillStyle = "#64748b";
+          ctx.beginPath();
+          ctx.arc(p.x + PLAYER_SIZE / 2, p.y + PLAYER_SIZE / 2, PLAYER_SIZE / 2, 0, Math.PI * 2);
+          ctx.fill();
+
+          ctx.font = "12px sans-serif";
+          ctx.textAlign = "center";
+          ctx.fillText("💀", p.x + PLAYER_SIZE / 2, p.y - 6);
+          ctx.restore();
+          continue;
+        }
+
+        const cx = p.x + PLAYER_SIZE / 2;
+        const cy = p.y + PLAYER_SIZE / 2;
+        ctx.fillStyle = p.color || "#00e5ff";
+        ctx.shadowColor = p.color || "#00e5ff";
+        ctx.shadowBlur = isSelf ? 14 : 8;
+
+        if (p.shape === "circle") {
+          ctx.beginPath();
+          ctx.arc(cx, cy, PLAYER_SIZE / 2, 0, Math.PI * 2);
+          ctx.fill();
+        } else if (p.shape === "triangle") {
+          ctx.beginPath();
+          ctx.moveTo(cx, p.y);
+          ctx.lineTo(p.x + PLAYER_SIZE, p.y + PLAYER_SIZE);
+          ctx.lineTo(p.x, p.y + PLAYER_SIZE);
+          ctx.closePath();
+          ctx.fill();
+        } else if (p.shape === "diamond") {
+          ctx.beginPath();
+          ctx.moveTo(cx, p.y);
+          ctx.lineTo(p.x + PLAYER_SIZE, cy);
+          ctx.lineTo(cx, p.y + PLAYER_SIZE);
+          ctx.lineTo(p.x, cy);
+          ctx.closePath();
+          ctx.fill();
+        } else {
+          ctx.fillRect(p.x, p.y, PLAYER_SIZE, PLAYER_SIZE);
+        }
+
+        ctx.fillStyle = "#ffffff";
+        ctx.beginPath();
+        ctx.arc(cx + (p.facingX || 1) * 7, cy + (p.facingY || 0) * 7, 2.5, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.shadowBlur = 0;
+        ctx.font = "bold 11px system-ui, sans-serif";
+        ctx.textAlign = "center";
+        ctx.fillStyle = isSelf ? "#5eead4" : "#ffffff";
+        const displayName = p.name ? (p.name.length > 10 ? p.name.slice(0, 9) + "…" : p.name) : "Player";
+        ctx.fillText(displayName, cx, p.y - 12);
+
+        const barW = 32;
+        const barH = 4;
+        const barX = cx - barW / 2;
+        const barY = p.y - 7;
+        
+        ctx.fillStyle = "rgba(0, 0, 0, 0.7)";
+        ctx.fillRect(barX, barY, barW, barH);
+
+        const hpRatio = Math.max(0, Math.min(1, (p.hp || 0) / (p.maxHp || 100)));
+        const hpColor = hpRatio > 0.5 ? "#22c55e" : (hpRatio > 0.25 ? "#eab308" : "#ef4444");
+        ctx.fillStyle = hpColor;
+        ctx.fillRect(barX, barY, barW * hpRatio, barH);
+
+        ctx.strokeStyle = "rgba(255, 255, 255, 0.25)";
+        ctx.lineWidth = 0.5;
+        ctx.strokeRect(barX, barY, barW, barH);
+
+        ctx.restore();
+      }
+
+      if (localIsSpectator) {
+        ctx.save();
+        ctx.fillStyle = "rgba(15, 23, 42, 0.85)";
+        ctx.strokeStyle = "#ef4444";
+        ctx.lineWidth = 1.5;
+        const bW = 280, bH = 32;
+        const bX = (SCREEN_WIDTH - bW) / 2;
+        const bY = 16;
+        ctx.fillRect(bX, bY, bW, bH);
+        ctx.strokeRect(bX, bY, bW, bH);
+
+        ctx.font = "bold 13px system-ui, sans-serif";
+        ctx.fillStyle = "#fca5a5";
+        ctx.textAlign = "center";
+        ctx.fillText("💀 SPECTATOR MODE — YOU ARE ELIMINATED", SCREEN_WIDTH / 2, bY + 20);
+        ctx.restore();
       }
     }
 
@@ -4494,8 +5060,19 @@
         }
       }
 
+      // Multiplayer 2-8 Player Shockwave
+      if (this.mode === "CUSTOM_ROOM" && this.mpState) {
+        const myId = this.peer?.id;
+        const casterId = this.isHost ? (myId || "host") : (myId || "guest");
+        if (this.isHost) {
+          this.mpHandlePush(casterId, cx, cy);
+        } else {
+          this._sendReliableToHost({ type: "MP_PUSH", casterId: casterId, cx: cx, cy: cy });
+        }
+      }
+
       const rival = (caster === this.p1) ? this.p2 : this.p1;
-      if (this.mode === "CUSTOM_ROOM" && rival.isAlive) {
+      if (this.mode === "CUSTOM_ROOM" && !this.mpState && rival.isAlive) {
         const rcx = rival.x + rival.size / 2;
         const rcy = rival.y + rival.size / 2;
         const dx = rcx - cx;
@@ -4947,6 +5524,141 @@
       if (this.announcement) {
         this.announcement.timer -= dt;
         if (this.announcement.timer <= 0) this.announcement = null;
+      }
+
+      // ══ MULTIPLAYER 2-8 PLAYERS (Milestone 3) ══
+      if (this.mode === "CUSTOM_ROOM" && this.mpState && this.mpState.status === "PLAYING") {
+        const myId = this.peer?.id;
+        const myP = myId ? this.mpState.players.get(myId) : (this.isHost ? this.mpState.players.values().next().value : null);
+        const isSpectator = myP ? (!myP.isAlive || myP.isSpectator) : false;
+
+        if (!this.isHost) {
+          if (isSpectator) {
+            this.p1Input.x = 0;
+            this.p1Input.y = 0;
+            this.p1.isSprinting = false;
+          } else {
+            // Send input to host throttled at ~30Hz
+            this.mpInputTimer = (this.mpInputTimer || 0) + dt;
+            const inputChanged = Math.abs(this.p1Input.x - (this.lastSentInputX || 0)) > 0.02 ||
+                                 Math.abs(this.p1Input.y - (this.lastSentInputY || 0)) > 0.02 ||
+                                 this.p1.isSprinting !== this.lastSentSprint;
+            if (inputChanged || this.mpInputTimer >= 0.033) {
+              this.mpInputTimer = 0;
+              this.lastSentInputX = this.p1Input.x;
+              this.lastSentInputY = this.p1Input.y;
+              this.lastSentSprint = this.p1.isSprinting;
+              this.mpInputSeq = (this.mpInputSeq || 0) + 1;
+              const inputMsg = {
+                type: "MP_INPUT",
+                peerId: myId,
+                x: this.p1Input.x,
+                y: this.p1Input.y,
+                sprint: !!this.p1.isSprinting,
+                seq: this.mpInputSeq
+              };
+              for (const [, conn] of this.mpConnections) {
+                const ch = (conn.unreliable && conn.unreliable.open) ? conn.unreliable : conn.reliable;
+                if (ch && ch.open) {
+                  try { ch.send(inputMsg); } catch(e) {}
+                }
+              }
+            }
+
+            // Local prediction for smooth 60fps rendering
+            if (myP) {
+              let speed = PLAYER_BASE_SPEED;
+              if (this.p1.isSprinting) speed *= SPRINT_SPEED_MULT;
+              let mx = this.p1Input.x;
+              let my = this.p1Input.y;
+              const len = Math.hypot(mx, my);
+              if (len > 1) { mx /= len; my /= len; }
+              myP.vx = mx * speed;
+              myP.vy = my * speed;
+              myP.x += myP.vx * dt;
+              myP.y += myP.vy * dt;
+              myP.x = Math.max(0, Math.min(SCREEN_WIDTH - PLAYER_SIZE, myP.x));
+              myP.y = Math.max(0, Math.min(SCREEN_HEIGHT - PLAYER_SIZE, myP.y));
+              this.p1.x = myP.x;
+              this.p1.y = myP.y;
+            }
+          }
+
+          // Update texts & particles
+          for (let i = this.floatingTexts.length - 1; i >= 0; i--) {
+            this.floatingTexts[i].update(dt);
+            if (this.floatingTexts[i].alpha <= 0) this.floatingTexts.splice(i, 1);
+          }
+          for (let i = this.particles.length - 1; i >= 0; i--) {
+            this.particles[i].update(dt);
+            if (this.particles[i].alpha <= 0) this.particles.splice(i, 1);
+          }
+          this.updateHUD();
+          return;
+        } else {
+          // HOST AUTHORITATIVE SIMULATION
+          const hostId = this.peer?.id;
+          const hostP = hostId ? this.mpState.players.get(hostId) : this.mpState.players.values().next().value;
+          if (hostP) {
+            if (hostP.isAlive && !hostP.isSpectator) {
+              hostP.input.x = this.p1Input.x;
+              hostP.input.y = this.p1Input.y;
+              hostP.input.sprint = !!this.p1.isSprinting;
+            } else {
+              hostP.input.x = 0;
+              hostP.input.y = 0;
+              hostP.input.sprint = false;
+            }
+          }
+
+          // Simulate all 2-8 players
+          for (const p of this.mpState.players.values()) {
+            if (!p.isAlive || p.isSpectator) {
+              p.vx = 0;
+              p.vy = 0;
+              continue;
+            }
+            let speed = PLAYER_BASE_SPEED;
+            if (p.input && p.input.sprint) speed *= SPRINT_SPEED_MULT;
+            let mx = p.input ? p.input.x : 0;
+            let my = p.input ? p.input.y : 0;
+            const len = Math.hypot(mx, my);
+            if (len > 1) { mx /= len; my /= len; }
+            p.vx = mx * speed;
+            p.vy = my * speed;
+            p.x += p.vx * dt;
+            p.y += p.vy * dt;
+            p.x = Math.max(0, Math.min(SCREEN_WIDTH - PLAYER_SIZE, p.x));
+            p.y = Math.max(0, Math.min(SCREEN_HEIGHT - PLAYER_SIZE, p.y));
+            if (len > 0.05) {
+              p.facingX = mx;
+              p.facingY = my;
+            }
+            if (p === hostP) {
+              this.p1.x = p.x;
+              this.p1.y = p.y;
+            }
+          }
+
+          // Authoritative snapshot broadcast at 25Hz
+          this.mpSnapshotTimer = (this.mpSnapshotTimer || 0) + dt;
+          if (this.mpSnapshotTimer >= 0.04) {
+            this.mpSnapshotTimer = 0;
+            this.mpBroadcastSnapshot();
+          }
+
+          // Update texts & particles
+          for (let i = this.floatingTexts.length - 1; i >= 0; i--) {
+            this.floatingTexts[i].update(dt);
+            if (this.floatingTexts[i].alpha <= 0) this.floatingTexts.splice(i, 1);
+          }
+          for (let i = this.particles.length - 1; i >= 0; i--) {
+            this.particles[i].update(dt);
+            if (this.particles[i].alpha <= 0) this.particles.splice(i, 1);
+          }
+          this.updateHUD();
+          return;
+        }
       }
 
       // Guest throttled input send (send immediately if changed, else at ~30Hz)
@@ -5503,8 +6215,12 @@
       }
 
       // Draw Players
-      this.p1.draw(ctx);
-      if (this.mode === "CUSTOM_ROOM") this.p2.draw(ctx);
+      if (this.mode === "CUSTOM_ROOM" && this.mpState && this.mpState.status === "PLAYING") {
+        this.drawMPPlayers(ctx);
+      } else {
+        this.p1.draw(ctx);
+        if (this.mode === "CUSTOM_ROOM") this.p2.draw(ctx);
+      }
 
       // Draw Particles & Texts
       for (let i = 0; i < this.particles.length; i++) this.particles[i].draw(ctx);
