@@ -4564,6 +4564,13 @@
         hostId: hostId,
         mode: mode || "ELITE",
         players: new Map(),
+        enemies: new Map(),
+        projectiles: [],
+        mines: [],
+        nextEnemyId: 1,
+        nextProjId: 1,
+        nextMineId: 1,
+        directorTimer: 0,
         processedEvents: new Set(),
         seq: 0,
         startTime: Date.now()
@@ -4666,6 +4673,13 @@
         hostId: msg.hostId,
         mode: msg.mode || "ELITE",
         players: new Map(),
+        enemies: new Map(),
+        projectiles: [],
+        mines: [],
+        nextEnemyId: 1,
+        nextProjId: 1,
+        nextMineId: 1,
+        directorTimer: 0,
         processedEvents: new Set(),
         seq: 0,
         startTime: Date.now()
@@ -4723,6 +4737,30 @@
           isSpectator: p.isSpectator,
           facingX: Math.round(p.facingX * 100) / 100,
           facingY: Math.round(p.facingY * 100) / 100
+        })),
+        enemies: Array.from(this.mpState.enemies.values()).map(e => ({
+          id: e.id,
+          type: e.type,
+          state: e.state,
+          x: Math.round(e.x * 10) / 10,
+          y: Math.round(e.y * 10) / 10,
+          vx: Math.round(e.vx * 10) / 10,
+          vy: Math.round(e.vy * 10) / 10,
+          hp: e.hp,
+          maxHp: e.maxHp,
+          stateTimer: Math.round((e.stateTimer || 0) * 100) / 100
+        })),
+        projectiles: this.mpState.projectiles.map(pr => ({
+          id: pr.id,
+          x: Math.round(pr.x * 10) / 10,
+          y: Math.round(pr.y * 10) / 10
+        })),
+        mines: this.mpState.mines.map(m => ({
+          id: m.id,
+          x: Math.round(m.x * 10) / 10,
+          y: Math.round(m.y * 10) / 10,
+          radius: m.radius,
+          armed: m.armed
         }))
       };
       this._broadcastUnreliable(snapshot);
@@ -4781,6 +4819,62 @@
             p.y = sp.y;
           }
         }
+      }
+
+      // Sync enemies on guest
+      if (Array.isArray(msg.enemies)) {
+        const receivedIds = new Set(msg.enemies.map(e => e.id));
+        for (const [id] of this.mpState.enemies) {
+          if (!receivedIds.has(id)) this.mpState.enemies.delete(id);
+        }
+        for (const se of msg.enemies) {
+          let e = this.mpState.enemies.get(se.id);
+          if (!e) {
+            e = {
+              id: se.id,
+              type: se.type,
+              state: se.state,
+              x: se.x,
+              y: se.y,
+              vx: se.vx,
+              vy: se.vy,
+              hp: se.hp,
+              maxHp: se.maxHp,
+              stateTimer: se.stateTimer
+            };
+            this.mpState.enemies.set(se.id, e);
+          } else {
+            e.type = se.type;
+            e.state = se.state;
+            e.x = se.x;
+            e.y = se.y;
+            e.vx = se.vx;
+            e.vy = se.vy;
+            e.hp = se.hp;
+            e.maxHp = se.maxHp;
+            e.stateTimer = se.stateTimer;
+          }
+        }
+      }
+
+      // Sync projectiles on guest
+      if (Array.isArray(msg.projectiles)) {
+        this.mpState.projectiles = msg.projectiles.map(pr => ({
+          id: pr.id,
+          x: pr.x,
+          y: pr.y
+        }));
+      }
+
+      // Sync mines on guest
+      if (Array.isArray(msg.mines)) {
+        this.mpState.mines = msg.mines.map(m => ({
+          id: m.id,
+          x: m.x,
+          y: m.y,
+          radius: m.radius,
+          armed: m.armed
+        }));
       }
     }
 
@@ -4878,6 +4972,476 @@
         setTimeout(() => {
           this._lobbyLeave();
         }, 1500);
+      }
+    }
+
+    // ══════════════════════════════════════════════════════════════
+    // MULTIPLAYER ENEMY AI (5 ARCHETYPES) — Milestone 4
+    // Chaser, Flanker, Sniper, Bomber, Disruptor + Adaptive Director
+    // ══════════════════════════════════════════════════════════════
+
+    mpSpawnEnemy(type, x, y) {
+      if (!this.isHost || !this.mpState) return null;
+      const id = "mpe_" + (this.mpState.nextEnemyId++);
+      
+      // Default spawn edge if not specified
+      if (x === undefined || y === undefined) {
+        const edge = Math.floor(Math.random() * 4);
+        if (edge === 0) { x = Math.random() * SCREEN_WIDTH; y = 10; }
+        else if (edge === 1) { x = Math.random() * SCREEN_WIDTH; y = SCREEN_HEIGHT - 25; }
+        else if (edge === 2) { x = 10; y = Math.random() * SCREEN_HEIGHT; }
+        else { x = SCREEN_WIDTH - 25; y = Math.random() * SCREEN_HEIGHT; }
+      }
+
+      let enemyObj = {
+        id,
+        type, // "CHASER", "FLANKER", "SNIPER", "BOMBER", "DISRUPTOR"
+        state: "IDLE", // FSM: "IDLE", "CHASE", "ORBIT", "DIVE", "CHARGE", "FIRE", "DEPLOY", "PULL", "STUN"
+        x,
+        y,
+        vx: 0,
+        vy: 0,
+        size: 18,
+        hp: 100,
+        maxHp: 100,
+        speed: 150,
+        targetId: null,
+        decisionTimer: 0,
+        stateTimer: 0,
+        attackCooldown: 0,
+        color: "#ff2a5f"
+      };
+
+      if (type === "CHASER") {
+        enemyObj.speed = 175;
+        enemyObj.size = 18;
+        enemyObj.color = "#ff3344"; // Aggressive red
+        enemyObj.state = "CHASE";
+      } else if (type === "FLANKER") {
+        enemyObj.speed = 210;
+        enemyObj.size = 16;
+        enemyObj.color = "#eab308"; // Amber
+        enemyObj.state = "ORBIT";
+        enemyObj.stateTimer = 2.0; // Orbit for 2s before dive
+      } else if (type === "SNIPER") {
+        enemyObj.speed = 100;
+        enemyObj.size = 20;
+        enemyObj.color = "#a855f7"; // Purple
+        enemyObj.state = "REPOSITION";
+        enemyObj.attackCooldown = 3.0;
+      } else if (type === "BOMBER") {
+        enemyObj.speed = 120;
+        enemyObj.size = 22;
+        enemyObj.color = "#f97316"; // Orange
+        enemyObj.state = "PATROL";
+        enemyObj.attackCooldown = 4.0;
+      } else if (type === "DISRUPTOR") {
+        enemyObj.speed = 135;
+        enemyObj.size = 24;
+        enemyObj.color = "#06b6d4"; // Cyan
+        enemyObj.state = "PULL";
+        enemyObj.attackCooldown = 5.0;
+      }
+
+      this.mpState.enemies.set(id, enemyObj);
+      return enemyObj;
+    }
+
+    mpSelectTarget(enemy) {
+      if (!this.mpState || this.mpState.players.size === 0) return null;
+      let bestTarget = null;
+      let bestScore = -Infinity;
+
+      // Count assignments per target to prevent dogpiling
+      const targetCounts = {};
+      for (const e of this.mpState.enemies.values()) {
+        if (e.targetId) targetCounts[e.targetId] = (targetCounts[e.targetId] || 0) + 1;
+      }
+
+      for (const [peerId, p] of this.mpState.players) {
+        if (!p.isAlive || p.isSpectator) continue;
+
+        const dist = Math.hypot(p.x - enemy.x, p.y - enemy.y);
+        const healthRatio = (p.hp || 100) / (p.maxHp || 100);
+        const assignedCount = targetCounts[peerId] || 0;
+
+        let score = 0;
+        if (enemy.type === "CHASER") {
+          // Prefers closest player with low load balancing penalty
+          score = (1000 - dist) - assignedCount * 120;
+        } else if (enemy.type === "FLANKER") {
+          // Prefers isolated players
+          score = (dist > 250 ? 500 : 200) - healthRatio * 150 - assignedCount * 200;
+        } else if (enemy.type === "SNIPER") {
+          // Strongly prefers lowest health targets
+          score = (1 - healthRatio) * 600 - assignedCount * 250;
+        } else if (enemy.type === "BOMBER") {
+          // Area denial near cluster of players
+          score = (800 - dist) - assignedCount * 100;
+        } else if (enemy.type === "DISRUPTOR") {
+          // Disrupts most dangerous or highest health player
+          score = healthRatio * 400 - dist * 0.5 - assignedCount * 150;
+        }
+
+        if (score > bestScore) {
+          bestScore = score;
+          bestTarget = peerId;
+        }
+      }
+
+      enemy.targetId = bestTarget;
+      return bestTarget;
+    }
+
+    mpUpdateEnemyAI(dt) {
+      if (!this.isHost || !this.mpState) return;
+
+      const alivePlayerCount = Array.from(this.mpState.players.values()).filter(p => p.isAlive && !p.isSpectator).length;
+      if (alivePlayerCount === 0) return;
+
+      // ── Adaptive Difficulty Director ──
+      // Scales max active enemies and spawn frequency based on player count (1 to 8)
+      // Active player count: 1-2 -> max 4; 3-4 -> max 7; 5-6 -> max 10; 7-8 -> max 14
+      const maxEnemies = Math.min(16, 2 + alivePlayerCount * 2);
+      const spawnInterval = Math.max(1.8, 4.5 - alivePlayerCount * 0.35);
+
+      this.mpState.directorTimer = (this.mpState.directorTimer || 0) + dt;
+      if (this.mpState.directorTimer >= spawnInterval && this.mpState.enemies.size < maxEnemies) {
+        this.mpState.directorTimer = 0;
+        const archetypes = ["CHASER", "FLANKER", "SNIPER", "BOMBER", "DISRUPTOR"];
+        const chosen = archetypes[Math.floor(Math.random() * archetypes.length)];
+        this.mpSpawnEnemy(chosen);
+      }
+
+      // ── Process Projectiles ──
+      for (let i = this.mpState.projectiles.length - 1; i >= 0; i--) {
+        const pr = this.mpState.projectiles[i];
+        pr.x += pr.vx * dt;
+        pr.y += pr.vy * dt;
+        pr.life -= dt;
+
+        // Collision with alive players (host authoritative)
+        let hit = false;
+        for (const [pId, p] of this.mpState.players) {
+          if (!p.isAlive || p.isSpectator) continue;
+          const dist = Math.hypot(p.x + PLAYER_SIZE / 2 - pr.x, p.y + PLAYER_SIZE / 2 - pr.y);
+          if (dist < PLAYER_SIZE / 2 + 5) {
+            this.mpApplyDamage(pId, pr.damage || 20, "enemy_sniper");
+            hit = true;
+            break;
+          }
+        }
+
+        if (hit || pr.life <= 0 || pr.x < 0 || pr.x > SCREEN_WIDTH || pr.y < 0 || pr.y > SCREEN_HEIGHT) {
+          this.mpState.projectiles.splice(i, 1);
+        }
+      }
+
+      // ── Process Mines ──
+      for (let i = this.mpState.mines.length - 1; i >= 0; i--) {
+        const m = this.mpState.mines[i];
+        m.armTimer -= dt;
+        if (m.armTimer <= 0) m.armed = true;
+
+        if (m.armed) {
+          for (const [pId, p] of this.mpState.players) {
+            if (!p.isAlive || p.isSpectator) continue;
+            const dist = Math.hypot(p.x + PLAYER_SIZE / 2 - m.x, p.y + PLAYER_SIZE / 2 - m.y);
+            if (dist < m.radius + PLAYER_SIZE / 2) {
+              // Detonate mine! Deals 20 AoE damage
+              this.mpApplyDamage(pId, 20, "enemy_mine");
+              this.floatingTexts.push(new FloatingText(m.x, m.y, "💥 MINE BLAST!", "#f97316"));
+              this.mpState.mines.splice(i, 1);
+              break;
+            }
+          }
+        }
+      }
+
+      // ── Finite State Machine for each Enemy ──
+      for (const [eId, e] of this.mpState.enemies) {
+        e.decisionTimer = (e.decisionTimer || 0) + dt;
+        if (e.decisionTimer >= 0.5 || !e.targetId) {
+          e.decisionTimer = 0;
+          this.mpSelectTarget(e);
+        }
+
+        let target = e.targetId ? this.mpState.players.get(e.targetId) : null;
+        if (!target || !target.isAlive || target.isSpectator) {
+          e.targetId = null;
+          this.mpSelectTarget(e);
+          target = e.targetId ? this.mpState.players.get(e.targetId) : null;
+          if (!target) continue;
+        }
+
+        const tcx = target.x + PLAYER_SIZE / 2;
+        const tcy = target.y + PLAYER_SIZE / 2;
+        const ecx = e.x + e.size / 2;
+        const ecy = e.y + e.size / 2;
+        const dx = tcx - ecx;
+        const dy = tcy - ecy;
+        const dist = Math.hypot(dx, dy);
+
+        // 1. CHASER: direct pursuit + contact damage
+        if (e.type === "CHASER") {
+          if (dist > 0) {
+            e.vx = (dx / dist) * e.speed;
+            e.vy = (dy / dist) * e.speed;
+            e.x += e.vx * dt;
+            e.y += e.vy * dt;
+          }
+          if (dist < e.size / 2 + PLAYER_SIZE / 2) {
+            // Contact damage (20 HP)
+            this.mpApplyDamage(e.targetId, 20, e.id);
+            // Rebound bounce
+            e.x -= (dx / (dist || 1)) * 30;
+            e.y -= (dy / (dist || 1)) * 30;
+          }
+        }
+
+        // 2. FLANKER: perimeter orbit -> dive attack
+        else if (e.type === "FLANKER") {
+          e.stateTimer -= dt;
+          if (e.state === "ORBIT") {
+            // Circle target at ~200px distance
+            const orbitRadius = 180;
+            const angle = Math.atan2(dy, dx) + 1.8 * dt;
+            const targetOrbitX = tcx - Math.cos(angle) * orbitRadius;
+            const targetOrbitY = tcy - Math.sin(angle) * orbitRadius;
+            e.vx = (targetOrbitX - ecx) * 2.5;
+            e.vy = (targetOrbitY - ecy) * 2.5;
+            e.x += e.vx * dt;
+            e.y += e.vy * dt;
+
+            if (e.stateTimer <= 0) {
+              e.state = "DIVE";
+              e.stateTimer = 1.2; // 1.2s rapid dive
+            }
+          } else if (e.state === "DIVE") {
+            if (dist > 0) {
+              e.vx = (dx / dist) * (e.speed * 1.5);
+              e.vy = (dy / dist) * (e.speed * 1.5);
+              e.x += e.vx * dt;
+              e.y += e.vy * dt;
+            }
+            if (dist < e.size / 2 + PLAYER_SIZE / 2) {
+              this.mpApplyDamage(e.targetId, 20, e.id);
+              e.state = "ORBIT";
+              e.stateTimer = 2.5;
+            } else if (e.stateTimer <= 0) {
+              e.state = "ORBIT";
+              e.stateTimer = 2.5;
+            }
+          }
+        }
+
+        // 3. SNIPER: Maintain range -> 1.2s telegraphed charge -> Railgun shot
+        else if (e.type === "SNIPER") {
+          if (e.state === "REPOSITION") {
+            if (dist < 220) {
+              // Back off to range
+              e.vx = -(dx / (dist || 1)) * e.speed;
+              e.vy = -(dy / (dist || 1)) * e.speed;
+              e.x += e.vx * dt;
+              e.y += e.vy * dt;
+            } else if (dist > 380) {
+              // Move closer into range
+              e.vx = (dx / dist) * e.speed;
+              e.vy = (dy / dist) * e.speed;
+              e.x += e.vx * dt;
+              e.y += e.vy * dt;
+            } else {
+              e.vx = 0;
+              e.vy = 0;
+              e.state = "CHARGE";
+              e.stateTimer = 1.2; // 1.2s charge beam per Appendix B
+            }
+          } else if (e.state === "CHARGE") {
+            e.stateTimer -= dt;
+            e.vx = 0;
+            e.vy = 0;
+            if (e.stateTimer <= 0) {
+              // Fire high-velocity railgun projectile!
+              const pSpeed = 550;
+              const angle = Math.atan2(dy, dx);
+              this.mpState.projectiles.push({
+                id: "pr_" + (this.mpState.nextProjId++),
+                x: ecx,
+                y: ecy,
+                vx: Math.cos(angle) * pSpeed,
+                vy: Math.sin(angle) * pSpeed,
+                damage: 20,
+                life: 1.5
+              });
+              e.state = "REPOSITION";
+              e.decisionTimer = 0;
+            }
+          }
+        }
+
+        // 4. BOMBER: Patrol perimeter -> drop stationary proximity mine
+        else if (e.type === "BOMBER") {
+          e.attackCooldown -= dt;
+          // Slowly wander or approach general area
+          if (dist > 150) {
+            e.vx = (dx / (dist || 1)) * e.speed;
+            e.vy = (dy / (dist || 1)) * e.speed;
+            e.x += e.vx * dt;
+            e.y += e.vy * dt;
+          }
+          if (e.attackCooldown <= 0) {
+            e.attackCooldown = 4.0;
+            // Deploy mine
+            if (this.mpState.mines.length < 8) {
+              this.mpState.mines.push({
+                id: "mine_" + (this.mpState.nextMineId++),
+                x: ecx,
+                y: ecy,
+                radius: 36,
+                armed: false,
+                armTimer: 1.0 // 1s to arm
+              });
+            }
+          }
+        }
+
+        // 5. DISRUPTOR: Pull field + slow towards center
+        else if (e.type === "DISRUPTOR") {
+          // Slowly glide towards center of map
+          const midX = SCREEN_WIDTH / 2;
+          const midY = SCREEN_HEIGHT / 2;
+          const mdx = midX - ecx;
+          const mdy = midY - ecy;
+          const mdist = Math.hypot(mdx, mdy);
+          if (mdist > 30) {
+            e.vx = (mdx / mdist) * e.speed * 0.7;
+            e.vy = (mdy / mdist) * e.speed * 0.7;
+            e.x += e.vx * dt;
+            e.y += e.vy * dt;
+          }
+
+          // Active gravity pull field on all nearby players
+          const pullRadius = 160;
+          for (const [pId, p] of this.mpState.players) {
+            if (!p.isAlive || p.isSpectator) continue;
+            const pdx = ecx - (p.x + PLAYER_SIZE / 2);
+            const pdy = ecy - (p.y + PLAYER_SIZE / 2);
+            const pdist = Math.hypot(pdx, pdy);
+            if (pdist < pullRadius && pdist > 10) {
+              const pullForce = (1 - pdist / pullRadius) * 60;
+              p.x += (pdx / pdist) * pullForce * dt;
+              p.y += (pdy / pdist) * pullForce * dt;
+            }
+          }
+        }
+
+        // Clamp arena bounds
+        e.x = Math.max(10, Math.min(SCREEN_WIDTH - e.size - 10, e.x));
+        e.y = Math.max(10, Math.min(SCREEN_HEIGHT - e.size - 10, e.y));
+      }
+    }
+
+    drawMPEnemies(ctx) {
+      if (!this.mpState) return;
+
+      // 1. Draw Mines
+      if (Array.isArray(this.mpState.mines)) {
+        for (const m of this.mpState.mines) {
+          ctx.save();
+          ctx.fillStyle = m.armed ? "rgba(249, 115, 22, 0.4)" : "rgba(148, 163, 184, 0.3)";
+          ctx.strokeStyle = m.armed ? "#f97316" : "#94a3b8";
+          ctx.lineWidth = 1.5;
+          ctx.beginPath();
+          ctx.arc(m.x, m.y, m.radius, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.stroke();
+
+          // Core dot
+          ctx.fillStyle = m.armed ? "#ff2244" : "#ffffff";
+          ctx.beginPath();
+          ctx.arc(m.x, m.y, 4, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.restore();
+        }
+      }
+
+      // 2. Draw Projectiles
+      if (Array.isArray(this.mpState.projectiles)) {
+        for (const pr of this.mpState.projectiles) {
+          ctx.save();
+          ctx.fillStyle = "#a855f7";
+          ctx.shadowColor = "#a855f7";
+          ctx.shadowBlur = 8;
+          ctx.beginPath();
+          ctx.arc(pr.x, pr.y, 4, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.restore();
+        }
+      }
+
+      // 3. Draw Enemies
+      for (const e of this.mpState.enemies.values()) {
+        ctx.save();
+        const ecx = e.x + e.size / 2;
+        const ecy = e.y + e.size / 2;
+
+        ctx.fillStyle = e.color || "#ff2a5f";
+        ctx.shadowColor = e.color || "#ff2a5f";
+        ctx.shadowBlur = 10;
+
+        if (e.type === "CHASER") {
+          // Sharp Spiky Diamond
+          ctx.beginPath();
+          ctx.moveTo(ecx, e.y);
+          ctx.lineTo(e.x + e.size, ecy);
+          ctx.lineTo(ecx, e.y + e.size);
+          ctx.lineTo(e.x, ecy);
+          ctx.closePath();
+          ctx.fill();
+        } else if (e.type === "FLANKER") {
+          // Sleek Arrow Triangle
+          ctx.beginPath();
+          ctx.moveTo(ecx, e.y);
+          ctx.lineTo(e.x + e.size, e.y + e.size);
+          ctx.lineTo(ecx, e.y + e.size * 0.7);
+          ctx.lineTo(e.x, e.y + e.size);
+          ctx.closePath();
+          ctx.fill();
+        } else if (e.type === "SNIPER") {
+          // Octagon / Crosshair
+          ctx.fillRect(e.x, e.y, e.size, e.size);
+          if (e.state === "CHARGE") {
+            // Telegraphed targeting laser beam
+            ctx.strokeStyle = "rgba(168, 85, 247, 0.7)";
+            ctx.lineWidth = 1.5;
+            ctx.beginPath();
+            ctx.moveTo(ecx, ecy);
+            ctx.lineTo(ecx + (e.vx || 1) * 300, ecy + (e.vy || 0) * 300);
+            ctx.stroke();
+          }
+        } else if (e.type === "BOMBER") {
+          // Heavy Hexagon
+          ctx.beginPath();
+          ctx.arc(ecx, ecy, e.size / 2, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.strokeStyle = "#ffffff";
+          ctx.lineWidth = 1.5;
+          ctx.stroke();
+        } else if (e.type === "DISRUPTOR") {
+          // Pulsing Gravity Orb with ring
+          ctx.beginPath();
+          ctx.arc(ecx, ecy, e.size / 2, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.strokeStyle = "rgba(6, 182, 212, 0.5)";
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          ctx.arc(ecx, ecy, e.size / 2 + 8, 0, Math.PI * 2);
+          ctx.stroke();
+        } else {
+          ctx.fillRect(e.x, e.y, e.size, e.size);
+        }
+
+        ctx.restore();
       }
     }
 
@@ -5640,6 +6204,9 @@
             }
           }
 
+          // Update Multiplayer Enemy AI
+          this.mpUpdateEnemyAI(dt);
+
           // Authoritative snapshot broadcast at 25Hz
           this.mpSnapshotTimer = (this.mpSnapshotTimer || 0) + dt;
           if (this.mpSnapshotTimer >= 0.04) {
@@ -6214,8 +6781,9 @@
         }
       }
 
-      // Draw Players
+      // Draw Players & MP Enemies
       if (this.mode === "CUSTOM_ROOM" && this.mpState && this.mpState.status === "PLAYING") {
+        this.drawMPEnemies(ctx);
         this.drawMPPlayers(ctx);
       } else {
         this.p1.draw(ctx);
