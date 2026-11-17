@@ -1478,6 +1478,8 @@
       this.minigunBullets = [];    // L5 minigun
       this.minigunCooldown = 0;
       this.soloWon = false;
+      this.bulletImg = new Image();
+      this.bulletImg.src = "bullet.png";
 
       // Entities
       this.enemies = [];
@@ -4580,10 +4582,21 @@
         for (const b of this.soloBosses) b.draw(ctx);
         // AK47 pickup
         if (this.ak47Pickup) this.ak47Pickup.draw(ctx);
-        // Player bullets
-        ctx.fillStyle = "#ffcc00";
+        // Player bullets (custom realistic ammo sprite)
         for (const bl of this.playerBullets) {
-          ctx.beginPath(); ctx.arc(bl.x, bl.y, 5, 0, Math.PI*2); ctx.fill();
+          ctx.save();
+          ctx.translate(bl.x, bl.y);
+          const angle = Math.atan2(bl.vy, bl.vx);
+          ctx.rotate(angle);
+          if (this.bulletImg && this.bulletImg.complete && this.bulletImg.naturalWidth > 0) {
+            ctx.shadowColor = "#ffcc00";
+            ctx.shadowBlur = 6;
+            ctx.drawImage(this.bulletImg, -13, -2.5, 26, 5);
+          } else {
+            ctx.fillStyle = "#ffcc00";
+            ctx.beginPath(); ctx.arc(0, 0, 5, 0, Math.PI * 2); ctx.fill();
+          }
+          ctx.restore();
         }
         // Wave mode enemies & bosses
         if (this.soloWaveMode) {
@@ -4626,8 +4639,13 @@
         if (this.gunEnabled) {
           ctx.fillStyle = this.ammo > 20 ? "#ffcc00" : "#ff4400";
           ctx.font = "bold 14px monospace";
-          const ammoText = this.minigunUnlimited ? "🔫 MINIGUN ∞" : `🔫 Ammo: ${this.ammo}/80`;
-          ctx.fillText(ammoText, 22, 80);
+          const ammoText = this.minigunUnlimited ? "MINIGUN ∞" : `AMMO: ${this.ammo}/80`;
+          if (this.bulletImg && this.bulletImg.complete && this.bulletImg.naturalWidth > 0) {
+            ctx.drawImage(this.bulletImg, 22, 69, 26, 6);
+            ctx.fillText(ammoText, 54, 76);
+          } else {
+            ctx.fillText(`🔫 ${ammoText}`, 22, 80);
+          }
         }
         // Level indicator
         ctx.fillStyle = "#aaffcc";

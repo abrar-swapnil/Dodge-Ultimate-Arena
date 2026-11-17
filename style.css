@@ -400,6 +400,15 @@ html, body {
   to { transform: scale(1.1); }
 }
 
+.gun-bullet-icon {
+  width: 24px;
+  height: 6px;
+  object-fit: contain;
+  display: block;
+  margin: 3px auto;
+  filter: drop-shadow(0 0 3px rgba(255, 215, 0, 0.9));
+}
+
 .btn-icon {
   font-size: 1.15rem;
   line-height: 1;
