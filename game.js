@@ -4782,14 +4782,14 @@
       if (this.mode === "SOLO") {
         ctx.save();
         const cardX = 14;
-        const cardY = 14;
-        const cardW = this.gunEnabled ? 150 : 135;
-        const cardH = this.gunEnabled ? 62 : 42;
+        const cardY = 52;
+        const cardW = this.gunEnabled ? 148 : 130;
+        const cardH = this.gunEnabled ? 56 : 38;
         const r = 8;
 
         // Semi-transparent backdrop with subtle border so game visual is never blocked
-        ctx.fillStyle = "rgba(7, 18, 26, 0.65)";
-        ctx.strokeStyle = "rgba(94, 234, 212, 0.25)";
+        ctx.fillStyle = "rgba(7, 18, 26, 0.7)";
+        ctx.strokeStyle = "rgba(94, 234, 212, 0.28)";
         ctx.lineWidth = 1;
 
         ctx.beginPath();
@@ -4806,12 +4806,12 @@
         // Player Score
         ctx.fillStyle = "#ffffff";
         ctx.font = "bold 13px monospace, sans-serif";
-        ctx.fillText(`SCORE: ${this.p1Score}`, cardX + 10, cardY + 17);
+        ctx.fillText(`SCORE: ${this.p1Score}`, cardX + 10, cardY + 16);
 
         // Dodges Left
         ctx.fillStyle = this.p1.emerDodges > 0 ? "#c084fc" : "#64748b";
         ctx.font = "11px monospace, sans-serif";
-        ctx.fillText(`⚡ DODGES: ${this.p1.emerDodges}/3`, cardX + 10, cardY + 32);
+        ctx.fillText(`⚡ DODGES: ${this.p1.emerDodges}/3`, cardX + 10, cardY + 30);
 
         // Ammo HUD (only when gun is unlocked)
         if (this.gunEnabled) {
@@ -4819,10 +4819,10 @@
           ctx.font = "bold 11px monospace, sans-serif";
           const ammoText = this.minigunUnlimited ? "MINIGUN ∞" : `AMMO: ${this.ammo}/80`;
           if (this.bulletImg && this.bulletImg.complete && this.bulletImg.naturalWidth > 0) {
-            ctx.drawImage(this.bulletImg, cardX + 10, cardY + 42, 18, 4);
-            ctx.fillText(ammoText, cardX + 34, cardY + 48);
+            ctx.drawImage(this.bulletImg, cardX + 10, cardY + 38, 18, 4);
+            ctx.fillText(ammoText, cardX + 34, cardY + 44);
           } else {
-            ctx.fillText(`🔫 ${ammoText}`, cardX + 10, cardY + 48);
+            ctx.fillText(`🔫 ${ammoText}`, cardX + 10, cardY + 44);
           }
         }
         ctx.restore();

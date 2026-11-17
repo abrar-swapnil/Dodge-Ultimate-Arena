@@ -32,12 +32,13 @@ html, body {
 /* Header toolbar for quick controls */
 #top-bar {
   position: absolute;
-  top: max(10px, env(safe-area-inset-top));
+  top: max(8px, env(safe-area-inset-top));
   left: 0;
   right: 0;
   display: flex;
   justify-content: space-between;
   align-items: center;
+  gap: 8px;
   padding: 0 16px;
   z-index: 40;
   pointer-events: none;
@@ -45,18 +46,23 @@ html, body {
 
 .brand {
   font-weight: 900;
-  font-size: 1.15rem;
-  letter-spacing: 1.5px;
+  font-size: clamp(0.75rem, 1.6vw, 1.05rem);
+  letter-spacing: 1px;
   color: #7dd3fc;
   text-shadow: 0 0 12px rgba(125, 211, 252, 0.7);
   pointer-events: auto;
+  white-space: nowrap;
+  flex-shrink: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .top-status {
   display: flex;
-  gap: 8px;
+  gap: 6px;
   align-items: center;
   pointer-events: auto;
+  flex-shrink: 0;
 }
 
 .badge {
@@ -465,7 +471,7 @@ html, body {
   text-align: center;
 }
 
-@media (max-width: 768px) {
+@media (max-width: 768px), (max-height: 520px) {
   #desktop-hint {
     display: none;
   }
@@ -473,11 +479,22 @@ html, body {
   /* Keep top status clean and avoid overlap */
   #top-bar {
     padding: 0 8px;
-    top: max(6px, env(safe-area-inset-top));
+    top: max(5px, env(safe-area-inset-top));
+    gap: 6px;
   }
 
   .brand {
-    font-size: 0.95rem;
+    font-size: 0.82rem;
+    letter-spacing: 0.5px;
+    max-width: 140px;
+  }
+
+  .brand-sub {
+    display: none; /* Shows '✦ DODGY' on phone, perfectly clean and never overlaps badges */
+  }
+
+  .top-status {
+    gap: 4px;
   }
 
   .badge {
