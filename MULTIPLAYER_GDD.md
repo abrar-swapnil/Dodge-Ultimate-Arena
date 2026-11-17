@@ -181,7 +181,7 @@ All four bidirectional infection interactions operate dynamically within the are
 
 #### Additional Match Timing & Transition Rules
 - **Initial Infection**: At match start, mini enemies spawn into the arena; some are initially infected and others are normal.
-- **Mutation & Buff**: Tagged players immediately mutate into the Infected team and receive a speed buff.
+- **Mutation**: Tagged players immediately change to the infected state/team, without any additional movement-speed buff.
 - **Survivor 60-Second Rule**: If at least one normal, non-eliminated player survives continuously for 60 seconds, trigger Branch 1 (Spawn Infected Boss & normalize all players).
 - **Early Total Infection Rule**: If all active players become infected before the 60-second threshold is met, trigger Branch 2 (Spawn Cosmic Boss).
 
