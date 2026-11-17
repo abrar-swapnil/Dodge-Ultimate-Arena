@@ -201,13 +201,57 @@
     },
   };
 
-  // --- Milestone 6A: Infection Mode Parameters (Configurable Appendix C) ---
+  // --- Milestone 6A & 6B: Infection Mode Parameters (Configurable Appendix C) ---
   const INFECTION_CONFIG = {
-    initialEnemyCount: 6,         // Configurable initial mini enemies
-    initialInfectedRatio: 0.5,    // 50% infected, 50% normal
-    enemySpeed: 140,              // Mini enemy baseline speed
-    enemyHp: 100,                 // Mini enemy baseline HP
-    contactDamage: 20             // Contact damage on hit
+    initialEnemyCount: 6,         // Configurable initial mini enemies (Appendix C)
+    initialInfectedRatio: 0.5,    // 50% infected, 50% normal (Appendix C)
+    enemySpeed: 140,              // Mini enemy baseline speed (Appendix C)
+    enemyHp: 100,                 // Mini enemy baseline HP (Appendix C)
+    contactDamage: 20,            // Contact damage on hit (Appendix C)
+    // Milestone 6B provisional defaults (Appendix C)
+    weaponSpawnPositions: [       // Configurable weapon spawn coordinates (Appendix C)
+      { x: 220, y: 200, defaultType: "ZOMBIE_KILLER" },
+      { x: 580, y: 200, defaultType: "COSMIC_BOMB" },
+      { x: 400, y: 440, defaultType: "RAYBLUSTER" }
+    ],
+    rayblusterRarity: 0.05,       // Configurable Raybluster rarity drop rate (Appendix C)
+    weaponPickupRadius: 18,       // Configurable pickup touch radius (Appendix C)
+    projectileSpeed: 650,         // Configurable projectile speed (Appendix C)
+    fireCooldown: 0.25            // Configurable weapon fire cooldown (Appendix C)
+  };
+
+  // --- Approved Infection Mode Weapon Definitions (GDD Section 5.2) ---
+  const INFECTION_WEAPONS = {
+    ZOMBIE_KILLER: {
+      type: "ZOMBIE_KILLER",
+      name: "Zombie Killer",
+      ammo: 150,
+      maxAmmo: 150,
+      infectedBossDamage: 100,
+      cosmicBossDamage: 50,
+      color: "#ff3366",
+      projectileColor: "#ff0055"
+    },
+    COSMIC_BOMB: {
+      type: "COSMIC_BOMB",
+      name: "Cosmic Bomb",
+      ammo: 150,
+      maxAmmo: 150,
+      infectedBossDamage: 50,
+      cosmicBossDamage: 100,
+      color: "#9933ff",
+      projectileColor: "#bf00ff"
+    },
+    RAYBLUSTER: {
+      type: "RAYBLUSTER",
+      name: "Raybluster",
+      ammo: Infinity,
+      maxAmmo: Infinity,
+      infectedBossDamage: 500,
+      cosmicBossDamage: 500,
+      color: "#ffff00",
+      projectileColor: "#00ffff"
+    }
   };
 
   // --- Sound Synthesizer (Web Audio API) ---
@@ -2491,13 +2535,13 @@
       };
       beamBtn?.addEventListener("pointerdown", handleBeam);
 
-      // Gun Button (Solo: fires AK-47 / Minigun; MP Elite: fires Fireball Gun)
+      // Gun Button (Solo: fires AK-47 / Minigun; MP: fires Fireball Gun or Infection Weapon)
       const gunBtn = document.getElementById("gun-btn");
       gunBtn?.addEventListener("pointerdown", (e) => {
         if (e.cancelable) e.preventDefault();
         this.sounds._init();
         if (this.mode === "SOLO" && this.state === "PLAYING") this.firePlayerBullet();
-        else if (this.mode === "CUSTOM_ROOM" && this.mpState && this.state === "PLAYING") this.fireEliteFireball();
+        else if (this.mode === "CUSTOM_ROOM" && this.mpState && this.state === "PLAYING") this.fireMultiplayerWeapon();
       });
 
       // Canvas click to restart
@@ -2544,13 +2588,13 @@
         stopGunFire();
       });
 
-      // Alt key hold (Solo) / KeyJ or Alt (MP Elite)
+      // Alt key hold (Solo) / KeyJ or Alt (MP Elite / Infection)
       window.addEventListener("keydown", (e) => {
         if ((e.code === "AltLeft" || e.code === "AltRight") && this.mode === "SOLO") {
           e.preventDefault();
           startGunFire();
         } else if ((e.code === "KeyJ" || e.code === "AltLeft" || e.code === "AltRight") && this.mode === "CUSTOM_ROOM") {
-          this.fireEliteFireball();
+          this.fireMultiplayerWeapon();
         }
       });
       window.addEventListener("keyup", (e) => {
@@ -4617,6 +4661,28 @@
           }
           break;
 
+        // Milestone 6B: Infection weapon pickup (host -> guest)
+        case "MP_WEAPON_PICKUP":
+          if (this.mpState && !this.isHost) {
+            this.handleMPWeaponPickup(msg);
+          }
+          break;
+
+        // Milestone 6B: Infection weapon shoot request (guest -> host)
+        case "MP_INFECTION_SHOOT":
+          if (this.isHost && this.mpState && this.mpState.mode === "INFECTION") {
+            const actualShooterId = (fromPeerId && this.mpState.players.has(fromPeerId)) ? fromPeerId : msg.shooterId;
+            this.mpHandleInfectionShoot(actualShooterId, msg.weaponType, msg.x, msg.y, msg.fx, msg.fy);
+          }
+          break;
+
+        // Milestone 6B: Infection weapon damage event (host -> guest)
+        case "MP_WEAPON_DAMAGE":
+          if (this.mpState && !this.isHost) {
+            this.handleMPWeaponDamage(msg);
+          }
+          break;
+
         // Legacy connection handling (for backwards compat with 2-player mode)
         default:
           if (this.state === "PLAYING") this._handleGameplayMessage(msg);
@@ -4725,7 +4791,12 @@
         bossVapors: [],
         playerFireballs: [],
         nextBossAttackId: 1,
-        nextFireballId: 1
+        nextFireballId: 1,
+        // --- Milestone 6B: Infection Mode weapons & projectiles fields ---
+        weaponPickups: [],
+        infectionProjectiles: [],
+        nextWeaponPickupId: 1,
+        nextInfectionProjId: 1
       };
 
       const SPAWN_POINTS = [
@@ -4777,6 +4848,7 @@
           isSpectator: false,
           isInfected: false,
           infectionState: "NORMAL",
+          infectionWeapon: null,
           isDashing: false,
           suppressedTimer: 0,
           input: { x: 0, y: 0, sprint: false },
@@ -4803,6 +4875,29 @@
               enemy.color = "#39ff14";
             }
           }
+        }
+
+        // Milestone 6B: Spawn initial weapon pickups in Infection Mode (Host authoritative)
+        const positions = INFECTION_CONFIG.weaponSpawnPositions || [
+          { x: 220, y: 200, defaultType: "ZOMBIE_KILLER" },
+          { x: 580, y: 200, defaultType: "COSMIC_BOMB" },
+          { x: 400, y: 440, defaultType: "RAYBLUSTER" }
+        ];
+        for (const pos of positions) {
+          let chosenType = pos.defaultType;
+          if (chosenType === "RAYBLUSTER") {
+            const roll = Math.random();
+            if (roll > (INFECTION_CONFIG.rayblusterRarity || 0.05)) {
+              chosenType = (Math.random() < 0.5) ? "ZOMBIE_KILLER" : "COSMIC_BOMB";
+            }
+          }
+          this.mpState.weaponPickups.push({
+            id: "wpk_" + (this.mpState.nextWeaponPickupId++),
+            type: chosenType,
+            x: pos.x,
+            y: pos.y,
+            radius: INFECTION_CONFIG.weaponPickupRadius || 18
+          });
         }
       }
 
@@ -4834,6 +4929,12 @@
             isAlive: p.isAlive,
             isSpectator: p.isSpectator,
             isInfected: !!p.isInfected
+          })),
+          weaponPickups: (this.mpState.weaponPickups || []).map(wpk => ({
+            id: wpk.id,
+            type: wpk.type,
+            x: wpk.x,
+            y: wpk.y
           }))
         };
         this._broadcastReliable(startMsg);
@@ -4873,7 +4974,17 @@
         boss: null,
         bossProjectiles: [],
         bossVapors: [],
-        playerFireballs: []
+        playerFireballs: [],
+        // --- Milestone 6B: Infection Mode weapons & projectiles fields ---
+        weaponPickups: (msg.weaponPickups || []).map(wpk => ({
+          id: wpk.id,
+          type: wpk.type,
+          x: wpk.x,
+          y: wpk.y
+        })),
+        infectionProjectiles: [],
+        nextWeaponPickupId: msg.nextWeaponPickupId || 1,
+        nextInfectionProjId: 1
       };
 
       if (Array.isArray(msg.players)) {
@@ -4897,6 +5008,7 @@
             isSpectator: sp.isSpectator || false,
             isInfected: !!sp.isInfected,
             infectionState: sp.isInfected ? "INFECTED" : "NORMAL",
+            infectionWeapon: null,
             input: { x: 0, y: 0, sprint: false },
             lastInputSeq: 0
           });
@@ -4931,7 +5043,11 @@
           suppressedTimer: Math.round((p.suppressedTimer || 0) * 10) / 10,
           facingX: Math.round(p.facingX * 100) / 100,
           facingY: Math.round(p.facingY * 100) / 100,
-          isInfected: !!p.isInfected
+          isInfected: !!p.isInfected,
+          infectionWeapon: p.infectionWeapon ? {
+            type: p.infectionWeapon.type,
+            ammo: p.infectionWeapon.ammo === Infinity ? -1 : p.infectionWeapon.ammo
+          } : null
         })),
         enemies: Array.from(this.mpState.enemies.values()).map(e => ({
           id: e.id,
@@ -5017,6 +5133,20 @@
           id: pf.id,
           x: Math.round(pf.x * 10) / 10,
           y: Math.round(pf.y * 10) / 10
+        })),
+        // Milestone 6B: Infection Mode weapon pickups and projectiles sync
+        weaponPickups: (this.mpState.weaponPickups || []).map(wpk => ({
+          id: wpk.id,
+          type: wpk.type,
+          x: Math.round(wpk.x * 10) / 10,
+          y: Math.round(wpk.y * 10) / 10
+        })),
+        infectionProjectiles: (this.mpState.infectionProjectiles || []).map(ip => ({
+          id: ip.id,
+          type: ip.weaponType,
+          x: Math.round(ip.x * 10) / 10,
+          y: Math.round(ip.y * 10) / 10,
+          color: ip.color
         }))
       };
       this._broadcastUnreliable(snapshot);
@@ -5064,6 +5194,26 @@
           if (sp.isInfected !== undefined) {
             p.isInfected = !!sp.isInfected;
             p.infectionState = p.isInfected ? "INFECTED" : "NORMAL";
+          }
+          if (sp.infectionWeapon !== undefined) {
+            if (sp.infectionWeapon === null) {
+              p.infectionWeapon = null;
+            } else {
+              const wDef = INFECTION_WEAPONS[sp.infectionWeapon.type];
+              if (!p.infectionWeapon || p.infectionWeapon.type !== sp.infectionWeapon.type) {
+                p.infectionWeapon = {
+                  type: sp.infectionWeapon.type,
+                  name: wDef ? wDef.name : sp.infectionWeapon.type,
+                  ammo: sp.infectionWeapon.ammo === -1 ? Infinity : sp.infectionWeapon.ammo,
+                  maxAmmo: wDef ? wDef.maxAmmo : 150,
+                  infectedBossDamage: wDef ? wDef.infectedBossDamage : 50,
+                  cosmicBossDamage: wDef ? wDef.cosmicBossDamage : 50,
+                  cooldown: 0
+                };
+              } else {
+                p.infectionWeapon.ammo = sp.infectionWeapon.ammo === -1 ? Infinity : sp.infectionWeapon.ammo;
+              }
+            }
           }
 
           if (sp.id === myId) {
@@ -5192,6 +5342,25 @@
       }
       if (Array.isArray(msg.playerFireballs)) {
         this.mpState.playerFireballs = msg.playerFireballs;
+      }
+
+      // Milestone 6B: Sync weapon pickups and infection projectiles on guest
+      if (Array.isArray(msg.weaponPickups)) {
+        this.mpState.weaponPickups = msg.weaponPickups.map(wpk => ({
+          id: wpk.id,
+          type: wpk.type,
+          x: wpk.x,
+          y: wpk.y
+        }));
+      }
+      if (Array.isArray(msg.infectionProjectiles)) {
+        this.mpState.infectionProjectiles = msg.infectionProjectiles.map(ip => ({
+          id: ip.id,
+          weaponType: ip.type,
+          x: ip.x,
+          y: ip.y,
+          color: ip.color
+        }));
       }
     }
 
@@ -6114,6 +6283,253 @@
           }
         }
       }
+
+      // --- Milestone 6B: Weapon Pickup Touch Detection (Host Authoritative) ---
+      if (st.weaponPickups && st.weaponPickups.length > 0) {
+        const collectedIds = new Set();
+        for (const p of st.players.values()) {
+          if (!p.isAlive || p.isSpectator || p.infectionWeapon) continue; // 1 weapon per player; no switching
+          const pcx = p.x + PLAYER_SIZE / 2;
+          const pcy = p.y + PLAYER_SIZE / 2;
+
+          for (const pk of st.weaponPickups) {
+            if (collectedIds.has(pk.id)) continue;
+            const dist = Math.hypot(pcx - pk.x, pcy - pk.y);
+            if (dist <= (PLAYER_SIZE / 2 + (pk.radius || INFECTION_CONFIG.weaponPickupRadius || 18))) {
+              collectedIds.add(pk.id);
+              this.mpCollectWeaponPickup(p.id, pk.id);
+              break; // Player collected one weapon, stop checking other pickups for this player
+            }
+          }
+        }
+      }
+
+      // --- Milestone 6B: Decrement Weapon Cooldown & Update Projectiles (Host) ---
+      for (const p of st.players.values()) {
+        if (p.infectionWeapon && p.infectionWeapon.cooldown > 0) {
+          p.infectionWeapon.cooldown = Math.max(0, p.infectionWeapon.cooldown - dt);
+        }
+      }
+      for (let i = (st.infectionProjectiles || []).length - 1; i >= 0; i--) {
+        const pr = st.infectionProjectiles[i];
+        pr.x += pr.vx * dt;
+        pr.y += pr.vy * dt;
+        pr.life -= dt;
+        if (pr.life <= 0 || pr.x < -20 || pr.x > SCREEN_WIDTH + 20 || pr.y < -20 || pr.y > SCREEN_HEIGHT + 20) {
+          st.infectionProjectiles.splice(i, 1);
+        }
+      }
+    }
+
+    // ══════════════════════════════════════════════════════════════
+    // MULTIPLAYER INFECTION WEAPON SYSTEM (Milestone 6B)
+    // Zombie Killer, Cosmic Bomb, Raybluster, Pickup & Damage Rules
+    // ══════════════════════════════════════════════════════════════
+
+    mpCollectWeaponPickup(playerId, pickupId, explicitEventId) {
+      if (!this.isHost || !this.mpState || this.mpState.mode !== "INFECTION") return false;
+      const player = this.mpState.players.get(playerId);
+      if (!player || !player.isAlive || player.isSpectator) return false;
+
+      // GDD Rule: Each player may carry only ONE weapon; no switching after pickup
+      if (player.infectionWeapon) return false;
+
+      // Find pickup in authoritative list
+      const pkIndex = (this.mpState.weaponPickups || []).findIndex(p => p.id === pickupId);
+      if (pkIndex === -1) return false; // Already collected or doesn't exist
+      const pk = this.mpState.weaponPickups[pkIndex];
+
+      const wDef = INFECTION_WEAPONS[pk.type];
+      if (!wDef) return false;
+
+      const eventId = explicitEventId || `wpk_col_${pickupId}_${playerId}_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;
+      if (this.mpState.processedEvents.has(eventId)) return false; // Dedup
+      this.mpState.processedEvents.add(eventId);
+
+      // Assign weapon to player
+      player.infectionWeapon = {
+        type: wDef.type,
+        name: wDef.name,
+        ammo: wDef.ammo,
+        maxAmmo: wDef.maxAmmo,
+        infectedBossDamage: wDef.infectedBossDamage,
+        cosmicBossDamage: wDef.cosmicBossDamage,
+        cooldown: 0
+      };
+
+      // Remove pickup from arena
+      this.mpState.weaponPickups.splice(pkIndex, 1);
+
+      this.floatingTexts.push(new FloatingText(player.x, player.y - 15, `🔫 ${wDef.name}!`, wDef.color));
+
+      // Reliable broadcast to all peers
+      this._broadcastReliable({
+        type: "MP_WEAPON_PICKUP",
+        eventId: eventId,
+        playerId: playerId,
+        weaponType: pk.type,
+        pickupId: pickupId
+      });
+
+      return true;
+    }
+
+    handleMPWeaponPickup(msg) {
+      if (!this.mpState || this.mpState.mode !== "INFECTION") return;
+      if (msg.eventId && this.mpState.processedEvents.has(msg.eventId)) return; // Dedup
+      if (msg.eventId) this.mpState.processedEvents.add(msg.eventId);
+
+      const p = this.mpState.players.get(msg.playerId);
+      const wDef = INFECTION_WEAPONS[msg.weaponType];
+      if (p && wDef) {
+        p.infectionWeapon = {
+          type: wDef.type,
+          name: wDef.name,
+          ammo: wDef.ammo,
+          maxAmmo: wDef.maxAmmo,
+          infectedBossDamage: wDef.infectedBossDamage,
+          cosmicBossDamage: wDef.cosmicBossDamage,
+          cooldown: 0
+        };
+        this.floatingTexts.push(new FloatingText(p.x, p.y - 15, `🔫 ${wDef.name}!`, wDef.color));
+      }
+      if (this.mpState.weaponPickups) {
+        this.mpState.weaponPickups = this.mpState.weaponPickups.filter(pk => pk.id !== msg.pickupId);
+      }
+      this.updateHUD();
+    }
+
+    mpHandleInfectionShoot(shooterId, weaponType, sx, sy, fx, fy) {
+      if (!this.isHost || !this.mpState || this.mpState.mode !== "INFECTION") return false;
+      const shooter = this.mpState.players.get(shooterId);
+      if (!shooter || !shooter.isAlive || shooter.isSpectator || (shooter.suppressedTimer > 0)) return false;
+      if (!shooter.infectionWeapon || shooter.infectionWeapon.type !== weaponType) return false;
+      if (shooter.infectionWeapon.ammo <= 0 && shooter.infectionWeapon.ammo !== Infinity) return false;
+
+      if (shooter.infectionWeapon.ammo !== Infinity) {
+        shooter.infectionWeapon.ammo--;
+      }
+
+      const originX = sx !== undefined ? sx : (shooter.x + PLAYER_SIZE / 2);
+      const originY = sy !== undefined ? sy : (shooter.y + PLAYER_SIZE / 2);
+      let dirX = fx !== undefined ? fx : (shooter.facingX || 1);
+      let dirY = fy !== undefined ? fy : (shooter.facingY || 0);
+      const len = Math.hypot(dirX, dirY);
+      if (len > 0.001) { dirX /= len; dirY /= len; } else { dirX = 1; dirY = 0; }
+
+      const wDef = INFECTION_WEAPONS[weaponType];
+      const proj = {
+        id: "pip_" + (this.mpState.nextInfectionProjId++),
+        shooterId: shooterId,
+        weaponType: weaponType,
+        x: originX,
+        y: originY,
+        vx: dirX * (INFECTION_CONFIG.projectileSpeed || 650),
+        vy: dirY * (INFECTION_CONFIG.projectileSpeed || 650),
+        radius: 8,
+        life: 2.0,
+        color: wDef ? wDef.projectileColor : "#ffffff"
+      };
+      if (!this.mpState.infectionProjectiles) this.mpState.infectionProjectiles = [];
+      this.mpState.infectionProjectiles.push(proj);
+      this.sounds?.playGunShot?.();
+      return true;
+    }
+
+    fireInfectionWeapon() {
+      if (this.mode !== "CUSTOM_ROOM" || !this.mpState || this.mpState.mode !== "INFECTION" || this.state !== "PLAYING") return;
+      const myId = this.peer ? this.peer.id : (this.isHost ? "host" : "guest");
+      const myP = this.mpState.players.get(myId) || (this.isHost ? this.mpState.players.values().next().value : null);
+      if (!myP || !myP.isAlive || myP.isSpectator || (myP.suppressedTimer > 0)) return;
+      if (!myP.infectionWeapon) return;
+      if (myP.infectionWeapon.ammo <= 0 && myP.infectionWeapon.ammo !== Infinity) return;
+      if (myP.infectionWeapon.cooldown > 0) return;
+
+      if (myP.infectionWeapon.ammo !== Infinity) {
+        myP.infectionWeapon.ammo--;
+      }
+      myP.infectionWeapon.cooldown = INFECTION_CONFIG.fireCooldown || 0.25;
+
+      const fx = myP.facingX || 1;
+      const fy = myP.facingY || 0;
+      const px = myP.x + PLAYER_SIZE / 2;
+      const py = myP.y + PLAYER_SIZE / 2;
+
+      if (this.isHost) {
+        this.mpHandleInfectionShoot(myP.id, myP.infectionWeapon.type, px, py, fx, fy);
+      } else {
+        this.sounds?.playGunShot?.();
+        this._broadcastReliable({
+          type: "MP_INFECTION_SHOOT",
+          shooterId: myP.id,
+          weaponType: myP.infectionWeapon.type,
+          x: px,
+          y: py,
+          fx: fx,
+          fy: fy
+        });
+      }
+      this.updateHUD();
+    }
+
+    fireMultiplayerWeapon() {
+      if (this.mode !== "CUSTOM_ROOM" || !this.mpState || this.state !== "PLAYING") return;
+      if (this.mpState.mode === "ELITE") {
+        this.fireEliteFireball();
+      } else if (this.mpState.mode === "INFECTION") {
+        this.fireInfectionWeapon();
+      }
+    }
+
+    mpApplyWeaponDamage(targetType, targetId, shooterId, weaponType, explicitEventId) {
+      if (!this.isHost || !this.mpState || this.mpState.mode !== "INFECTION") return null;
+      const shooter = this.mpState.players.get(shooterId);
+      if (!shooter || !shooter.isAlive || shooter.isSpectator || (shooter.suppressedTimer > 0)) return null;
+      if (!shooter.infectionWeapon || shooter.infectionWeapon.type !== weaponType) return null;
+      if (shooter.infectionWeapon.ammo <= 0 && shooter.infectionWeapon.ammo !== Infinity) return null;
+
+      const wDef = INFECTION_WEAPONS[weaponType];
+      if (!wDef) return null;
+
+      let damage = 0;
+      if (targetType === "INFECTED_BOSS") {
+        damage = wDef.infectedBossDamage;
+      } else if (targetType === "COSMIC_BOSS") {
+        damage = wDef.cosmicBossDamage;
+      } else {
+        return null; // Invalid target per GDD
+      }
+
+      const eventId = explicitEventId || `wpk_dmg_${targetId}_${shooterId}_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;
+      if (this.mpState.processedEvents.has(eventId)) return null; // Dedup
+      this.mpState.processedEvents.add(eventId);
+
+      // Decrement target boss HP if boss entity is present
+      if (this.mpState.boss && this.mpState.boss.id === targetId) {
+        this.mpState.boss.hp = Math.max(0, this.mpState.boss.hp - damage);
+      }
+
+      this._broadcastReliable({
+        type: "MP_WEAPON_DAMAGE",
+        eventId: eventId,
+        targetType: targetType,
+        targetId: targetId,
+        shooterId: shooterId,
+        weaponType: weaponType,
+        damage: damage
+      });
+
+      return { damage, eventId };
+    }
+
+    handleMPWeaponDamage(msg) {
+      if (!this.mpState || this.mpState.mode !== "INFECTION") return;
+      if (msg.eventId && this.mpState.processedEvents.has(msg.eventId)) return; // Dedup
+      if (msg.eventId) this.mpState.processedEvents.add(msg.eventId);
+
+      if (this.mpState.boss && this.mpState.boss.id === msg.targetId) {
+        this.mpState.boss.hp = Math.max(0, this.mpState.boss.hp - (msg.damage || 0));
+      }
     }
 
     mpUpdateEnemyAI(dt) {
@@ -6858,11 +7274,20 @@
         else beamBtn.classList.add("hidden");
       }
 
-      // Show gun button in Solo mode or when player has Fireball Gun in Elite mode
+      // Show gun button in Solo mode, when player has Fireball Gun in Elite mode, or when player has weapon in Infection mode
       const gunBtn = document.getElementById("gun-btn");
       if (gunBtn) {
-        const hasEliteGun = (this.mode === "CUSTOM_ROOM" && this.mpState && myPlayer?.fireballGun && myPlayer.fireballGun.ammo > 0);
-        if (this.mode === "SOLO" || hasEliteGun) gunBtn.style.display = "";
+        let hasMpGun = false;
+        if (this.mode === "CUSTOM_ROOM" && this.mpState) {
+          const myId = this.peer ? this.peer.id : (this.isHost ? "host" : "guest");
+          const myP = this.mpState.players.get(myId) || (this.isHost ? this.mpState.players.values().next().value : null);
+          if (this.mpState.mode === "ELITE") {
+            hasMpGun = !!(myP?.fireballGun && myP.fireballGun.ammo > 0);
+          } else if (this.mpState.mode === "INFECTION") {
+            hasMpGun = !!(myP?.infectionWeapon && (myP.infectionWeapon.ammo > 0 || myP.infectionWeapon.ammo === Infinity));
+          }
+        }
+        if (this.mode === "SOLO" || hasMpGun) gunBtn.style.display = "";
         else gunBtn.style.display = "none";
       }
 
@@ -7239,6 +7664,22 @@
               myP.y = Math.max(0, Math.min(SCREEN_HEIGHT - PLAYER_SIZE, myP.y));
               this.p1.x = myP.x;
               this.p1.y = myP.y;
+            }
+
+            // Milestone 6B: Update infection projectiles & weapon cooldown on guest
+            if (this.mpState.mode === "INFECTION") {
+              if (myP?.infectionWeapon && myP.infectionWeapon.cooldown > 0) {
+                myP.infectionWeapon.cooldown = Math.max(0, myP.infectionWeapon.cooldown - dt);
+              }
+              for (let i = (this.mpState.infectionProjectiles || []).length - 1; i >= 0; i--) {
+                const pr = this.mpState.infectionProjectiles[i];
+                pr.x += pr.vx * dt;
+                pr.y += pr.vy * dt;
+                pr.life -= dt;
+                if (pr.life <= 0 || pr.x < -20 || pr.x > SCREEN_WIDTH + 20 || pr.y < -20 || pr.y > SCREEN_HEIGHT + 20) {
+                  this.mpState.infectionProjectiles.splice(i, 1);
+                }
+              }
             }
           }
 
@@ -7859,6 +8300,48 @@
       }
     }
 
+    // Milestone 6B: Draw Infection Mode weapon pickups
+    _drawInfectionWeaponPickups(ctx, pickups) {
+      const t = (this.gameTime || 0);
+      for (const pk of pickups) {
+        const pulse = 0.85 + 0.15 * Math.sin(t * 4 + (pk.id ? pk.id.length : 1) * 1.3);
+        const wDef = INFECTION_WEAPONS[pk.type] || { color: "#ffffff", name: pk.type };
+        ctx.save();
+        ctx.translate(pk.x, pk.y);
+        ctx.scale(pulse, pulse);
+        ctx.shadowColor = wDef.color;
+        ctx.shadowBlur = 14;
+        ctx.strokeStyle = wDef.color;
+        ctx.lineWidth = 2;
+        ctx.strokeRect(-12, -12, 24, 24);
+        ctx.fillStyle = "rgba(0, 0, 0, 0.75)";
+        ctx.fillRect(-12, -12, 24, 24);
+        ctx.fillStyle = wDef.color;
+        ctx.font = "bold 9px monospace, sans-serif";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        const label = pk.type === "ZOMBIE_KILLER" ? "ZK" : (pk.type === "COSMIC_BOMB" ? "CB" : "RB");
+        ctx.fillText(label, 0, 0);
+        ctx.restore();
+      }
+    }
+
+    // Milestone 6B: Draw Infection Mode projectiles
+    _drawInfectionProjectiles(ctx, projectiles) {
+      for (const pr of projectiles) {
+        ctx.save();
+        ctx.translate(pr.x, pr.y);
+        const color = pr.color || "#00ffff";
+        ctx.shadowColor = color;
+        ctx.shadowBlur = 10;
+        ctx.fillStyle = color;
+        ctx.beginPath();
+        ctx.arc(0, 0, pr.radius || 7, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+      }
+    }
+
     // Milestone 5B: Draw Elite Mode environmental hazards (smoke bombs, toxic gas, laser wall)
     _drawEliteHazards(ctx, hazards) {
       if (!hazards) return;
@@ -8130,6 +8613,16 @@
         this._drawDemonBossAndCombat(ctx);
       }
 
+      // Milestone 6B: Draw Infection Mode weapon pickups and projectiles
+      if (isInfectionMP && this.mpState) {
+        if (Array.isArray(this.mpState.weaponPickups)) {
+          this._drawInfectionWeaponPickups(ctx, this.mpState.weaponPickups);
+        }
+        if (Array.isArray(this.mpState.infectionProjectiles)) {
+          this._drawInfectionProjectiles(ctx, this.mpState.infectionProjectiles);
+        }
+      }
+
       // Draw Enemies (normal)
       for (let i = 0; i < this.enemies.length; i++) {
         this.enemies[i].draw(ctx, theme, IS_MOBILE);
@@ -8240,7 +8733,7 @@
         ctx.restore();
       }
 
-      // Milestone 6A: Infection Mode HUD (top-center)
+      // Milestone 6A & 6B: Infection Mode HUD (top-center)
       if (isInfectionMP && this.mpState && this.mpState.status === "PLAYING") {
         ctx.save();
         let survivorCount = 0;
@@ -8250,8 +8743,12 @@
           if (p.isInfected) infectedCount++;
           else survivorCount++;
         }
-        const hudW = 230;
-        const hudH = 34;
+        const myId = this.peer ? this.peer.id : (this.isHost ? "host" : "guest");
+        const myP = this.mpState.players.get(myId) || (this.isHost ? this.mpState.players.values().next().value : null);
+        const hasWeapon = myP?.infectionWeapon;
+
+        const hudW = 240;
+        const hudH = hasWeapon ? 48 : 34;
         const hudX = (SCREEN_WIDTH - hudW) / 2;
         const hudY = 8;
         ctx.fillStyle = "rgba(4,13,8,0.85)";
@@ -8269,7 +8766,14 @@
         ctx.font = "bold 11px system-ui, monospace";
         ctx.textAlign = "center";
         ctx.fillStyle = "#00ff66";
-        ctx.fillText(`☣️ SURVIVORS: ${survivorCount}  |  INFECTED: ${infectedCount}`, SCREEN_WIDTH / 2, hudY + 21);
+        ctx.fillText(`☣️ SURVIVORS: ${survivorCount}  |  INFECTED: ${infectedCount}`, SCREEN_WIDTH / 2, hudY + 18);
+
+        if (hasWeapon) {
+          const ammoStr = myP.infectionWeapon.ammo === Infinity ? "∞" : `${myP.infectionWeapon.ammo}/150`;
+          ctx.fillStyle = myP.infectionWeapon.ammo === Infinity ? "#ffff00" : (myP.infectionWeapon.ammo > 30 ? "#00ffea" : "#ff4444");
+          ctx.font = "bold 10px monospace, sans-serif";
+          ctx.fillText(`🔫 ${myP.infectionWeapon.name.toUpperCase()}: ${ammoStr}`, SCREEN_WIDTH / 2, hudY + 36);
+        }
         ctx.restore();
       }
 
