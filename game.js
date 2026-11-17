@@ -1302,22 +1302,50 @@
 
   // --- AK-47 Pickup Item ---
   class AK47Pickup {
-    constructor(x, y) { this.x = x; this.y = y; this.size = 24; this.pulse = 0; }
-    get rect() { return { x: Math.round(this.x), y: Math.round(this.y), w: this.size, h: this.size }; }
-    update(dt) { this.pulse = (this.pulse + dt * 3) % (Math.PI * 2); }
+    constructor(x, y, img) {
+      this.x = x;
+      this.y = y;
+      this.size = 40;
+      this.angle = 0;
+      this.img = img || null;
+    }
+    get rect() {
+      return { x: Math.round(this.x), y: Math.round(this.y), w: this.size, h: this.size };
+    }
+    update(dt) {
+      this.angle += dt * 2.2; // Continuous 360-degree rotation around its center
+    }
     draw(ctx) {
+      const cx = this.x + this.size / 2;
+      const cy = this.y + this.size / 2;
+
       ctx.save();
-      const scale = 1 + Math.sin(this.pulse) * 0.15;
-      const cx = this.x + this.size/2, cy = this.y + this.size/2;
-      ctx.translate(cx, cy); ctx.scale(scale, scale);
-      ctx.shadowColor="#ffcc00"; ctx.shadowBlur=20;
-      ctx.fillStyle="#ffcc00";
-      ctx.font = "bold 22px sans-serif"; ctx.textAlign="center"; ctx.textBaseline="middle";
-      ctx.fillText("🔫", 0, 0);
+      ctx.translate(cx, cy);
+      ctx.rotate(this.angle);
+
+      ctx.shadowColor = "#ffaa00";
+      ctx.shadowBlur = 20;
+
+      if (this.img && this.img.complete && this.img.naturalWidth > 0) {
+        const w = 68;
+        const h = 20;
+        ctx.drawImage(this.img, -w / 2, -h / 2, w, h);
+      } else {
+        ctx.fillStyle = "#ffcc00";
+        ctx.font = "bold 26px sans-serif";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillText("🔫", 0, 0);
+      }
       ctx.restore();
+
       ctx.save();
-      ctx.fillStyle="#ffcc00"; ctx.font="bold 10px monospace"; ctx.textAlign="center";
-      ctx.fillText("AK-47 PICKUP", cx, this.y + this.size + 12);
+      ctx.shadowColor = "#000000";
+      ctx.shadowBlur = 8;
+      ctx.fillStyle = "#ffcc00";
+      ctx.font = "bold 11px monospace";
+      ctx.textAlign = "center";
+      ctx.fillText("⚡ AK-47 PICKUP ⚡", cx, this.y + this.size + 14);
       ctx.restore();
     }
   }
@@ -1547,6 +1575,8 @@
       this.soloWon = false;
       this.bulletImg = new Image();
       this.bulletImg.src = "bullet.png";
+      this.ak47Img = new Image();
+      this.ak47Img.src = "ak47.png";
 
       // Entities
       this.enemies = [];
@@ -4004,7 +4034,11 @@
           this.soloBosses.push(new AshleyBoss(2500));
           const g2 = new MinigunBoss(2500); g2.x = SCREEN_WIDTH-150; g2.y = 90;
           this.soloBosses.push(g2);
-          this.ak47Pickup = new AK47Pickup(150+Math.random()*(SCREEN_WIDTH-300), 200+Math.random()*(SCREEN_HEIGHT-400));
+          this.ak47Pickup = new AK47Pickup(
+            150 + Math.random() * (SCREEN_WIDTH - 300),
+            200 + Math.random() * (SCREEN_HEIGHT - 400),
+            this.ak47Img
+          );
           this.sounds.playWarning();
         }
         if (this.bossSpawnedForLevel && this.soloBosses.length === 0 && this.soloLevel === 3) {
