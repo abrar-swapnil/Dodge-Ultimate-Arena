@@ -471,26 +471,32 @@ html, body {
   text-align: center;
 }
 
-@media (max-width: 768px), (max-height: 520px) {
+@media (max-width: 768px), (max-height: 550px), (orientation: landscape) and (max-height: 600px), (orientation: landscape) and (max-width: 950px) {
   #desktop-hint {
     display: none;
   }
 
   /* Keep top status clean and avoid overlap */
   #top-bar {
-    padding: 0 8px;
-    top: max(5px, env(safe-area-inset-top));
+    padding-left: max(8px, env(safe-area-inset-left));
+    padding-right: max(8px, env(safe-area-inset-right));
+    padding-top: 0;
+    padding-bottom: 0;
+    top: max(4px, env(safe-area-inset-top));
     gap: 6px;
   }
 
   .brand {
-    font-size: 0.82rem;
-    letter-spacing: 0.5px;
-    max-width: 140px;
+    font-size: 0.78rem !important;
+    letter-spacing: 0.5px !important;
+    max-width: 85px !important;
+    white-space: nowrap !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
   }
 
   .brand-sub {
-    display: none; /* Shows '✦ DODGY' on phone, perfectly clean and never overlaps badges */
+    display: none !important; /* Shows '✦ DODGY' on phone, perfectly clean and never overlaps badges */
   }
 
   .top-status {

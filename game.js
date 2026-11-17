@@ -2469,6 +2469,13 @@
         this.canvas.width = SCREEN_WIDTH * dpr;
         this.canvas.height = SCREEN_HEIGHT * dpr;
         this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+        // Ensure brand text is compact on mobile / landscape across all browsers & iOS
+        const brandSub = document.querySelector(".brand-sub");
+        if (brandSub) {
+          const isCompact = window.innerWidth <= 768 || window.innerHeight <= 550 || (window.innerWidth <= 950 && window.innerHeight < window.innerWidth);
+          brandSub.style.display = isCompact ? "none" : "";
+        }
       };
 
       window.addEventListener("resize", resize);
@@ -4782,7 +4789,7 @@
       if (this.mode === "SOLO") {
         ctx.save();
         const cardX = 14;
-        const cardY = 52;
+        const cardY = 56;
         const cardW = this.gunEnabled ? 148 : 130;
         const cardH = this.gunEnabled ? 56 : 38;
         const r = 8;
