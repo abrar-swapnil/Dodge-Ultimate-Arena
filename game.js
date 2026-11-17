@@ -4624,6 +4624,7 @@
           isAlive: true,
           isSpectator: false,
           isDashing: false,
+          suppressedTimer: 0,
           input: { x: 0, y: 0, sprint: false },
           lastInputSeq: 0,
           isSelf: isSelf
@@ -4735,6 +4736,7 @@
           hp: p.hp,
           isAlive: p.isAlive,
           isSpectator: p.isSpectator,
+          suppressedTimer: Math.round((p.suppressedTimer || 0) * 10) / 10,
           facingX: Math.round(p.facingX * 100) / 100,
           facingY: Math.round(p.facingY * 100) / 100
         })),
@@ -4792,6 +4794,7 @@
               maxHp: 100,
               isAlive: sp.isAlive !== undefined ? sp.isAlive : true,
               isSpectator: sp.isSpectator || false,
+              suppressedTimer: sp.suppressedTimer || 0,
               input: { x: 0, y: 0, sprint: false },
               lastInputSeq: 0
             };
@@ -4801,6 +4804,7 @@
           p.hp = sp.hp !== undefined ? sp.hp : p.hp;
           p.isAlive = sp.isAlive !== undefined ? sp.isAlive : p.isAlive;
           p.isSpectator = sp.isSpectator || false;
+          p.suppressedTimer = sp.suppressedTimer !== undefined ? sp.suppressedTimer : (p.suppressedTimer || 0);
           p.facingX = sp.facingX !== undefined ? sp.facingX : p.facingX;
           p.facingY = sp.facingY !== undefined ? sp.facingY : p.facingY;
 
@@ -4936,7 +4940,7 @@
     mpHandlePush(casterId, cx, cy) {
       if (!this.isHost || !this.mpState) return;
       const caster = this.mpState.players.get(casterId);
-      if (!caster || !caster.isAlive || caster.isSpectator) return;
+      if (!caster || !caster.isAlive || caster.isSpectator || (caster.suppressedTimer > 0)) return;
 
       const originX = cx !== undefined ? cx : (caster.x + PLAYER_SIZE / 2);
       const originY = cy !== undefined ? cy : (caster.y + PLAYER_SIZE / 2);
@@ -5098,6 +5102,11 @@
 
       const alivePlayerCount = Array.from(this.mpState.players.values()).filter(p => p.isAlive && !p.isSpectator).length;
       if (alivePlayerCount === 0) return;
+
+      // ── Decrement Player Status Effects ──
+      for (const p of this.mpState.players.values()) {
+        if (p.suppressedTimer > 0) p.suppressedTimer = Math.max(0, p.suppressedTimer - dt);
+      }
 
       // ── Adaptive Difficulty Director ──
       // Scales max active enemies and spawn frequency based on player count (1 to 8)
@@ -5320,7 +5329,7 @@
             e.y += e.vy * dt;
           }
 
-          // Active gravity pull field on all nearby players
+          // Active gravity pull field + EMP ability suppression on nearby players
           const pullRadius = 160;
           for (const [pId, p] of this.mpState.players) {
             if (!p.isAlive || p.isSpectator) continue;
@@ -5331,6 +5340,10 @@
               const pullForce = (1 - pdist / pullRadius) * 60;
               p.x += (pdx / pdist) * pullForce * dt;
               p.y += (pdy / pdist) * pullForce * dt;
+
+              // EMP ability suppression status effect (GDD 6.1)
+              // Temporarily suppresses dash/push abilities without locking movement
+              p.suppressedTimer = Math.max(p.suppressedTimer || 0, 1.0);
             }
           }
         }
@@ -5530,6 +5543,13 @@
         ctx.strokeStyle = "rgba(255, 255, 255, 0.25)";
         ctx.lineWidth = 0.5;
         ctx.strokeRect(barX, barY, barW, barH);
+
+        // Visual EMP indicator if suppressed
+        if (p.suppressedTimer > 0) {
+          ctx.fillStyle = "#06b6d4";
+          ctx.font = "9px monospace";
+          ctx.fillText("⚡EMP", cx, barY - 3);
+        }
 
         ctx.restore();
       }

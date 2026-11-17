@@ -323,6 +323,14 @@ const initialX = p1.x;
 const testDisruptor = game.mpSpawnEnemy("DISRUPTOR", 300, 300);
 game.mpUpdateEnemyAI(0.1);
 assert(p1.x < initialX, "Disruptor gravitational field pulls alive players inward");
+assert(p1.suppressedTimer > 0, "Disruptor EMP suppresses player abilities in radius");
+
+// Suppressed player cannot cast Push shockwave
+p1.x = 200; p1.y = 200;
+p2.x = 230; p2.y = 200;
+const prePushX = p2.x;
+game.mpHandlePush("host-1", 200, 200);
+assert(p2.x === prePushX, "Suppressed player cannot trigger Push shockwave during EMP status");
 
 // -----------------------------------------------------------------
 // Test Section 5: Adaptive Difficulty Director Scaling
