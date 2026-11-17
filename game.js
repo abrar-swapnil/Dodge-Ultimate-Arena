@@ -4961,8 +4961,8 @@
         ctx.fillText(`ALL BOSSES DEFEATED! Final Score: ${this.p1Score}`, SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2 + 10);
       } else if (this.mode === "SOLO") {
         ctx.fillStyle = "#ff3344";
-        ctx.font = "bold 48px monospace, sans-serif";
-        ctx.fillText("RUN OVER", SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2 - 40);
+        ctx.font = "bold 40px system-ui, -apple-system, sans-serif";
+        ctx.fillText("Game Over!! U Loser😂", SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2 - 40);
 
         ctx.fillStyle = "#ffffff";
         ctx.font = "bold 26px monospace, sans-serif";
