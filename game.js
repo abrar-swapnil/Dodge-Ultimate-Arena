@@ -176,6 +176,38 @@
            ctx.fillStyle = grd; ctx.fillRect(0,0,800,600);
          }
     },
+    // --- Milestone 6A: Quarantine Lab (Infection Mode exclusive map) ---
+    "INFECTION": { name: "☣️ QUARANTINE LAB", bg: "#040d08", border: "#00ff66", enemy: "#39ff14",
+         draw(ctx) {
+           // Laboratory bio-hazard tile grid
+           ctx.strokeStyle = "rgba(0,255,102,0.12)"; ctx.lineWidth = 1;
+           for(let x=40; x<800; x+=40) { ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,600); ctx.stroke(); }
+           for(let y=40; y<600; y+=40) { ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(800,y); ctx.stroke(); }
+           // Bio-spore containment circles
+           ctx.strokeStyle = "rgba(0,255,102,0.18)"; ctx.lineWidth = 2;
+           [[200,150,50],[600,150,50],[200,450,50],[600,450,50],[400,300,70]].forEach(([cx,cy,r])=>{
+             ctx.beginPath(); ctx.arc(cx,cy,r,0,Math.PI*2); ctx.stroke();
+           });
+           // Toxic bio-mist particles
+           ctx.fillStyle = "rgba(57,255,20,0.15)";
+           for(let i=0;i<20;i++){ ctx.beginPath(); ctx.arc(35+i*38,(i*53+25)%580,2.5,0,Math.PI*2); ctx.fill(); }
+           // Quarantine perimeter warning glow
+           const grd = ctx.createLinearGradient(0,0,0,600);
+           grd.addColorStop(0,"rgba(0,255,102,0.06)");
+           grd.addColorStop(0.5,"rgba(0,0,0,0)");
+           grd.addColorStop(1,"rgba(0,255,102,0.06)");
+           ctx.fillStyle = grd; ctx.fillRect(0,0,800,600);
+         }
+    },
+  };
+
+  // --- Milestone 6A: Infection Mode Parameters (Configurable Appendix C) ---
+  const INFECTION_CONFIG = {
+    initialEnemyCount: 6,         // Configurable initial mini enemies
+    initialInfectedRatio: 0.5,    // 50% infected, 50% normal
+    enemySpeed: 140,              // Mini enemy baseline speed
+    enemyHp: 100,                 // Mini enemy baseline HP
+    contactDamage: 20             // Contact damage on hit
   };
 
   // --- Sound Synthesizer (Web Audio API) ---
@@ -4578,6 +4610,13 @@
           }
           break;
 
+        // Milestone 6A: Infection event (host -> guest)
+        case "MP_INFECTION_EVENT":
+          if (this.mpState && !this.isHost) {
+            this.handleMPInfectionEvent(msg);
+          }
+          break;
+
         // Legacy connection handling (for backwards compat with 2-player mode)
         default:
           if (this.state === "PLAYING") this._handleGameplayMessage(msg);
@@ -4736,6 +4775,8 @@
           maxHp: 100,
           isAlive: true,
           isSpectator: false,
+          isInfected: false,
+          infectionState: "NORMAL",
           isDashing: false,
           suppressedTimer: 0,
           input: { x: 0, y: 0, sprint: false },
@@ -4745,6 +4786,24 @@
 
         this.mpState.players.set(peerId, playerObj);
         idx++;
+      }
+
+      // Milestone 6A: Spawn initial mini enemies in Infection Mode (some infected, some normal per GDD)
+      if (this.isHost && this.mpState.mode === "INFECTION") {
+        const count = INFECTION_CONFIG.initialEnemyCount;
+        const infectedCount = Math.floor(count * INFECTION_CONFIG.initialInfectedRatio);
+        const archetypes = ["CHASER", "FLANKER", "SNIPER", "BOMBER", "DISRUPTOR"];
+        for (let i = 0; i < count; i++) {
+          const type = archetypes[i % archetypes.length];
+          const enemy = this.mpSpawnEnemy(type);
+          if (enemy) {
+            enemy.isInfected = (i < infectedCount);
+            enemy.infectionState = enemy.isInfected ? "INFECTED" : "NORMAL";
+            if (enemy.isInfected) {
+              enemy.color = "#39ff14";
+            }
+          }
+        }
       }
 
       const myId = this.peer?.id;
@@ -4773,7 +4832,8 @@
             hp: p.hp,
             maxHp: p.maxHp,
             isAlive: p.isAlive,
-            isSpectator: p.isSpectator
+            isSpectator: p.isSpectator,
+            isInfected: !!p.isInfected
           }))
         };
         this._broadcastReliable(startMsg);
@@ -4835,6 +4895,8 @@
             maxHp: sp.maxHp || 100,
             isAlive: sp.isAlive !== undefined ? sp.isAlive : true,
             isSpectator: sp.isSpectator || false,
+            isInfected: !!sp.isInfected,
+            infectionState: sp.isInfected ? "INFECTED" : "NORMAL",
             input: { x: 0, y: 0, sprint: false },
             lastInputSeq: 0
           });
@@ -4868,7 +4930,8 @@
           isSpectator: p.isSpectator,
           suppressedTimer: Math.round((p.suppressedTimer || 0) * 10) / 10,
           facingX: Math.round(p.facingX * 100) / 100,
-          facingY: Math.round(p.facingY * 100) / 100
+          facingY: Math.round(p.facingY * 100) / 100,
+          isInfected: !!p.isInfected
         })),
         enemies: Array.from(this.mpState.enemies.values()).map(e => ({
           id: e.id,
@@ -4880,7 +4943,8 @@
           vy: Math.round(e.vy * 10) / 10,
           hp: e.hp,
           maxHp: e.maxHp,
-          stateTimer: Math.round((e.stateTimer || 0) * 100) / 100
+          stateTimer: Math.round((e.stateTimer || 0) * 100) / 100,
+          isInfected: !!e.isInfected
         })),
         projectiles: this.mpState.projectiles.map(pr => ({
           id: pr.id,
@@ -4997,6 +5061,10 @@
           p.suppressedTimer = sp.suppressedTimer !== undefined ? sp.suppressedTimer : (p.suppressedTimer || 0);
           p.facingX = sp.facingX !== undefined ? sp.facingX : p.facingX;
           p.facingY = sp.facingY !== undefined ? sp.facingY : p.facingY;
+          if (sp.isInfected !== undefined) {
+            p.isInfected = !!sp.isInfected;
+            p.infectionState = p.isInfected ? "INFECTED" : "NORMAL";
+          }
 
           if (sp.id === myId) {
             const dist = Math.hypot(this.p1.x - sp.x, this.p1.y - sp.y);
@@ -5034,8 +5102,11 @@
               vy: se.vy,
               hp: se.hp,
               maxHp: se.maxHp,
-              stateTimer: se.stateTimer
+              stateTimer: se.stateTimer,
+              isInfected: !!se.isInfected,
+              infectionState: se.isInfected ? "INFECTED" : "NORMAL"
             };
+            if (e.isInfected) e.color = "#39ff14";
             this.mpState.enemies.set(se.id, e);
           } else {
             e.type = se.type;
@@ -5047,6 +5118,11 @@
             e.hp = se.hp;
             e.maxHp = se.maxHp;
             e.stateTimer = se.stateTimer;
+            if (se.isInfected !== undefined) {
+              e.isInfected = !!se.isInfected;
+              e.infectionState = e.isInfected ? "INFECTED" : "NORMAL";
+              if (e.isInfected) e.color = "#39ff14";
+            }
           }
         }
       }
@@ -5872,6 +5948,174 @@
       }
     }
 
+    // ══════════════════════════════════════════════════════════════
+    // MULTIPLAYER INFECTION MODE (Milestone 6A)
+    // 4 Propagation Interactions, Host Authority, Deduplication & Sync
+    // ══════════════════════════════════════════════════════════════
+
+    mpInfectEntity(targetType, targetId, sourceId, explicitEventId) {
+      if (!this.isHost || !this.mpState || this.mpState.mode !== "INFECTION") return false;
+      const st = this.mpState;
+
+      if (targetType === "PLAYER") {
+        const player = st.players.get(targetId);
+        // Entity must exist, be alive, not spectator, and NOT already infected
+        if (!player || !player.isAlive || player.isSpectator || player.isInfected) return false;
+
+        const eventId = explicitEventId || `inf_p_${targetId}_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;
+        if (st.processedEvents.has(eventId)) return false; // Dedup
+        st.processedEvents.add(eventId);
+
+        // Mutate state to infected (NO speed buff, NO extra abilities)
+        player.isInfected = true;
+        player.infectionState = "INFECTED";
+
+        this.floatingTexts.push(new FloatingText(player.x, player.y - 15, "☣️ INFECTED!", "#39ff14"));
+
+        // Reliable broadcast to all players
+        this._broadcastReliable({
+          type: "MP_INFECTION_EVENT",
+          eventId: eventId,
+          targetType: "PLAYER",
+          targetId: targetId,
+          sourceId: sourceId
+        });
+        return true;
+      } else if (targetType === "ENEMY") {
+        const enemy = st.enemies.get(targetId);
+        // Entity must exist, have HP > 0, and NOT already infected
+        if (!enemy || enemy.hp <= 0 || enemy.isInfected) return false;
+
+        const eventId = explicitEventId || `inf_e_${targetId}_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;
+        if (st.processedEvents.has(eventId)) return false; // Dedup
+        st.processedEvents.add(eventId);
+
+        // Mutate state to infected (NO speed buff, NO extra abilities)
+        enemy.isInfected = true;
+        enemy.infectionState = "INFECTED";
+        enemy.color = "#39ff14";
+
+        this.floatingTexts.push(new FloatingText(enemy.x, enemy.y - 15, "☣️ INFECTED!", "#39ff14"));
+
+        // Reliable broadcast to all players
+        this._broadcastReliable({
+          type: "MP_INFECTION_EVENT",
+          eventId: eventId,
+          targetType: "ENEMY",
+          targetId: targetId,
+          sourceId: sourceId
+        });
+        return true;
+      }
+      return false;
+    }
+
+    handleMPInfectionEvent(msg) {
+      if (!this.mpState || this.mpState.mode !== "INFECTION") return;
+      if (msg.eventId && this.mpState.processedEvents.has(msg.eventId)) return; // Dedup
+      if (msg.eventId) this.mpState.processedEvents.add(msg.eventId);
+
+      if (msg.targetType === "PLAYER") {
+        const p = this.mpState.players.get(msg.targetId);
+        if (p && !p.isInfected) {
+          p.isInfected = true;
+          p.infectionState = "INFECTED";
+          this.floatingTexts.push(new FloatingText(p.x, p.y - 15, "☣️ INFECTED!", "#39ff14"));
+        }
+      } else if (msg.targetType === "ENEMY") {
+        const e = this.mpState.enemies.get(msg.targetId);
+        if (e && !e.isInfected) {
+          e.isInfected = true;
+          e.infectionState = "INFECTED";
+          e.color = "#39ff14";
+          this.floatingTexts.push(new FloatingText(e.x, e.y - 15, "☣️ INFECTED!", "#39ff14"));
+        }
+      }
+    }
+
+    mpUpdateInfection(dt) {
+      if (!this.isHost || !this.mpState || this.mpState.mode !== "INFECTION") return;
+      const st = this.mpState;
+
+      // Classify living players into infected and normal
+      const infectedPlayers = [];
+      const normalPlayers = [];
+      for (const p of st.players.values()) {
+        if (!p.isAlive || p.isSpectator) continue;
+        if (p.isInfected) infectedPlayers.push(p);
+        else normalPlayers.push(p);
+      }
+
+      // Classify active enemies into infected and normal
+      const infectedEnemies = [];
+      const normalEnemies = [];
+      for (const e of st.enemies.values()) {
+        if (e.hp <= 0) continue;
+        if (e.isInfected) infectedEnemies.push(e);
+        else normalEnemies.push(e);
+      }
+
+      // Interaction 1: Infected mini enemy touches normal mini enemy -> infect normal mini enemy
+      for (const infE of infectedEnemies) {
+        for (const normE of normalEnemies) {
+          if (normE.isInfected) continue;
+          const ecx1 = infE.x + infE.size / 2;
+          const ecy1 = infE.y + infE.size / 2;
+          const ecx2 = normE.x + normE.size / 2;
+          const ecy2 = normE.y + normE.size / 2;
+          const dist = Math.hypot(ecx1 - ecx2, ecy1 - ecy2);
+          if (dist <= (infE.size / 2 + normE.size / 2)) {
+            this.mpInfectEntity("ENEMY", normE.id, infE.id);
+          }
+        }
+      }
+
+      // Interaction 2: Infected mini enemy touches normal player -> infect normal player
+      for (const infE of infectedEnemies) {
+        for (const normP of normalPlayers) {
+          if (normP.isInfected) continue;
+          const ecx = infE.x + infE.size / 2;
+          const ecy = infE.y + infE.size / 2;
+          const pcx = normP.x + PLAYER_SIZE / 2;
+          const pcy = normP.y + PLAYER_SIZE / 2;
+          const dist = Math.hypot(ecx - pcx, ecy - pcy);
+          if (dist <= (infE.size / 2 + PLAYER_SIZE / 2)) {
+            this.mpInfectEntity("PLAYER", normP.id, infE.id);
+          }
+        }
+      }
+
+      // Interaction 3: Infected player touches normal player -> infect normal player
+      for (const infP of infectedPlayers) {
+        for (const normP of normalPlayers) {
+          if (normP.isInfected) continue;
+          const pcx1 = infP.x + PLAYER_SIZE / 2;
+          const pcy1 = infP.y + PLAYER_SIZE / 2;
+          const pcx2 = normP.x + PLAYER_SIZE / 2;
+          const pcy2 = normP.y + PLAYER_SIZE / 2;
+          const dist = Math.hypot(pcx1 - pcx2, pcy1 - pcy2);
+          if (dist <= PLAYER_SIZE) {
+            this.mpInfectEntity("PLAYER", normP.id, infP.id);
+          }
+        }
+      }
+
+      // Interaction 4: Infected player touches normal mini enemy -> infect normal mini enemy
+      for (const infP of infectedPlayers) {
+        for (const normE of normalEnemies) {
+          if (normE.isInfected) continue;
+          const pcx = infP.x + PLAYER_SIZE / 2;
+          const pcy = infP.y + PLAYER_SIZE / 2;
+          const ecx = normE.x + normE.size / 2;
+          const ecy = normE.y + normE.size / 2;
+          const dist = Math.hypot(pcx - ecx, pcy - ecy);
+          if (dist <= (PLAYER_SIZE / 2 + normE.size / 2)) {
+            this.mpInfectEntity("ENEMY", normE.id, infP.id);
+          }
+        }
+      }
+    }
+
     mpUpdateEnemyAI(dt) {
       if (!this.isHost || !this.mpState) return;
 
@@ -6175,9 +6419,17 @@
         const ecx = e.x + e.size / 2;
         const ecy = e.y + e.size / 2;
 
-        ctx.fillStyle = e.color || "#ff2a5f";
-        ctx.shadowColor = e.color || "#ff2a5f";
-        ctx.shadowBlur = 10;
+        ctx.fillStyle = e.isInfected ? "#39ff14" : (e.color || "#ff2a5f");
+        ctx.shadowColor = e.isInfected ? "#39ff14" : (e.color || "#ff2a5f");
+        ctx.shadowBlur = e.isInfected ? 14 : 10;
+
+        if (e.isInfected) {
+          ctx.strokeStyle = "#39ff14";
+          ctx.lineWidth = 1.5;
+          ctx.beginPath();
+          ctx.arc(ecx, ecy, e.size / 2 + 4, 0, Math.PI * 2);
+          ctx.stroke();
+        }
 
         if (e.type === "CHASER") {
           // Sharp Spiky Diamond
@@ -6320,6 +6572,18 @@
         ctx.strokeStyle = "rgba(255, 255, 255, 0.25)";
         ctx.lineWidth = 0.5;
         ctx.strokeRect(barX, barY, barW, barH);
+
+        // Visual infection indicator (Milestone 6A)
+        if (p.isInfected) {
+          ctx.strokeStyle = "#39ff14";
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          ctx.arc(cx, cy, PLAYER_SIZE / 2 + 3, 0, Math.PI * 2);
+          ctx.stroke();
+          ctx.fillStyle = "#39ff14";
+          ctx.font = "bold 9px monospace, sans-serif";
+          ctx.fillText("☣️ INFECTED", cx, p.y - 18);
+        }
 
         // Visual EMP indicator if suppressed
         if (p.suppressedTimer > 0) {
@@ -7040,6 +7304,11 @@
           // Milestone 5A: Update Elite Mode pickups (host only)
           if (this.mpState.mode === "ELITE") {
             this.mpUpdateElite(dt);
+          }
+
+          // Milestone 6A: Update Infection Mode propagation (host only)
+          if (this.mpState.mode === "INFECTION") {
+            this.mpUpdateInfection(dt);
           }
 
           // Authoritative snapshot broadcast at 25Hz
@@ -7823,11 +8092,14 @@
     draw() {
       const ctx = this.ctx;
 
-      // Milestone 5A: Use Obsidian Crucible theme for Elite Mode MP matches
+      // Milestone 5A & 6A: Use dedicated map themes for MP matches
       const isEliteMP = (this.mode === "CUSTOM_ROOM" && this.mpState && this.mpState.mode === "ELITE");
+      const isInfectionMP = (this.mode === "CUSTOM_ROOM" && this.mpState && this.mpState.mode === "INFECTION");
       const theme = isEliteMP
         ? (MAP_THEMES["ELITE"] || MAP_THEMES[1])
-        : (MAP_THEMES[this.mapIndex] || MAP_THEMES[1]);
+        : (isInfectionMP
+          ? (MAP_THEMES["INFECTION"] || MAP_THEMES[1])
+          : (MAP_THEMES[this.mapIndex] || MAP_THEMES[1]));
 
       // Dynamic Map Background
       ctx.fillStyle = theme.bg;
@@ -7836,8 +8108,8 @@
       // Draw themed map decoration (no grid)
       if (theme.draw) theme.draw(ctx);
 
-      // Draw Collectibles (Solo only — Elite Mode uses mpState.pickups)
-      if (!isEliteMP) {
+      // Draw Collectibles (Solo only — MP uses mode-specific pickups)
+      if (!isEliteMP && !isInfectionMP) {
         for (let i = 0; i < this.items.length; i++) {
           this.items[i].draw(ctx, this.gameTime, IS_MOBILE);
         }
@@ -7965,6 +8237,39 @@
           ctx.font = "bold 14px monospace, sans-serif";
           ctx.fillText(`TEAM SCORE: ${this.mpState.teamScore}`, SCREEN_WIDTH / 2, hudY + 29);
         }
+        ctx.restore();
+      }
+
+      // Milestone 6A: Infection Mode HUD (top-center)
+      if (isInfectionMP && this.mpState && this.mpState.status === "PLAYING") {
+        ctx.save();
+        let survivorCount = 0;
+        let infectedCount = 0;
+        for (const p of this.mpState.players.values()) {
+          if (!p.isAlive || p.isSpectator) continue;
+          if (p.isInfected) infectedCount++;
+          else survivorCount++;
+        }
+        const hudW = 230;
+        const hudH = 34;
+        const hudX = (SCREEN_WIDTH - hudW) / 2;
+        const hudY = 8;
+        ctx.fillStyle = "rgba(4,13,8,0.85)";
+        ctx.strokeStyle = "#00ff66";
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        if (typeof ctx.roundRect === "function") {
+          ctx.roundRect(hudX, hudY, hudW, hudH, 6);
+        } else {
+          ctx.rect(hudX, hudY, hudW, hudH);
+        }
+        ctx.fill();
+        ctx.stroke();
+
+        ctx.font = "bold 11px system-ui, monospace";
+        ctx.textAlign = "center";
+        ctx.fillStyle = "#00ff66";
+        ctx.fillText(`☣️ SURVIVORS: ${survivorCount}  |  INFECTED: ${infectedCount}`, SCREEN_WIDTH / 2, hudY + 21);
         ctx.restore();
       }
 
