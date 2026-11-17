@@ -155,14 +155,15 @@ Match Start
 
 ### 4.3 Infection Mechanics
 
-| Mechanic | Detail |
-|---|---|
-| Grace period | **10 seconds** at match start — no infection can spread |
-| Alpha Infected | 1 player randomly selected at grace period end |
-| Alpha Infected attributes | Increased movement speed; can perform melee infection strike |
-| Infection strike | Direct contact with a Survivor tags them; they mutate into Infected team |
-| Mutation | Tagged Survivor immediately joins Infected team with same speed buff |
-| Survivor 60-second rule | If at least one normal, non-eliminated player survives continuously for 60 seconds, trigger Branch 1 (Spawn Infected Boss & normalize all players) |
+> [!WARNING]
+> **Audit Flag**: The 10-second grace period and Alpha Infected designation were not part of the original Infection Mode concept and are flagged for explicit user approval (see Appendix C.2).
+
+| Mechanic | Detail | Status |
+|---|---|---|
+| Initial Infection Trigger | Mechanism for initial contamination (e.g. grace period / Alpha selection vs other onset) | **FLAGGED — Unapproved (See App C.2)** |
+| Infection strike | Direct contact tags a player; they mutate into the Infected team | Approved Concept |
+| Mutation | Tagged player immediately joins Infected team with speed buff | Approved Concept |
+| Survivor 60-second rule | If at least one normal, non-eliminated player survives continuously for 60 seconds, trigger Branch 1 (Spawn Infected Boss & normalize all players) | Approved Concept |
 
 ### 4.4 Mutually Exclusive Boss Branches
 
@@ -171,23 +172,39 @@ Match Start
 
 #### Branch 1 — Infected Boss
 **Trigger condition:** At least one normal, non-eliminated player survives continuously for **60 seconds**.
-- Spawns the **Infected Boss**.
-- **Normalizes all players** (reverting infection state).
+- Spawns the **Infected Boss** (2500 HP).
+- **Normalizes all players** (reverts infection status).
+
+| Boss Property | Approved Specification |
+|---|---|
+| **Health (HP)** | Exactly **2500 HP** fixed (does not scale with player count) |
+| **Ability 1 — World Cutting Slash** | Deals **50 damage**; the missed/severed arena section becomes unavailable after **3 seconds** |
+| **Ability 2 — Possessed Minions** | Spawns **3 possessed infected mini enemies** every **10 seconds**; each wave replaces the previous summoned set |
+| **Ability 3 — Targeted Jump** | Targeted aerial jump attack with a **3-second warning telegraph** |
 
 > [!NOTE]
-> Exact Infected Boss health, ability names, cooldowns, damage values, targeting behavior, post-normalization player mechanics, and match victory/loss conditions are **unresolved / not yet specified** and are flagged in Appendix C.
+> Jump impact damage/radius, slash width/orientation, and final victory/defeat conditions are recorded in Appendix C for approval.
 
 #### Branch 2 — Cosmic Boss
 **Trigger condition:** All active players become infected **before** the 60-second survival condition is reached.
-- Spawns the **Cosmic Boss**.
+- Spawns the **Cosmic Boss** (2500 HP).
 - Mutually exclusive with the Infected Boss branch.
 
+| Boss Property | Approved Specification |
+|---|---|
+| **Health (HP)** | Exactly **2500 HP** fixed (does not scale with player count) |
+| **Ability 1 — Falling Sun** | Impact creates a hazard crater; falling into the crater **instantly eliminates** a player |
+| **Ability 2 — Black Hole** | Gravitational pull draws players in, freezes them for **15 seconds**, then safely returns them to the arena |
+| **Ability 3 — White Hole** | Repulsive force throws players outside the map, freezes them for **15 seconds**, then safely returns them to the arena |
+| **Player UI / HUD** | Displays an on-screen **15-second countdown timer** while a player is affected by Black Hole or White Hole |
+
 > [!NOTE]
-> Exact Cosmic Boss health, ability names, cooldowns, damage values, targeting behavior, player state/faction rules upon spawn, and match victory/loss conditions are **unresolved / not yet specified** and are flagged in Appendix C.
+> Crater size/duration, hole cooldowns/pull strength, and final victory/defeat conditions are recorded in Appendix C for approval.
 
 ### 4.5 Infection Mode Weapons (Three Dedicated Weapons)
 Weapon availability, ammo, and spawn points are specific to the Quarantine Lab map.
-Full weapon specs are in [Section 5](#5-weapons--combat-engine).
+- **Rule**: Exactly **one weapon per player**; **no switching** after pickup.
+Full weapon specs are detailed in [Section 5.2](#52-multiplayer-weapon-roster).
 
 ---
 
@@ -203,38 +220,32 @@ Controls are shared across all multiplayer weapons. No new HUD buttons are added
 
 ### 5.2 Multiplayer Weapon Roster
 
-#### Weapon 1 — Scatter Shotgun
+#### Weapon 1 — Zombie Killer (Infection Mode)
 | Property | Value |
 |---|---|
-| Type | Close-range pellet spread |
-| Secondary effect | Strong knockback on hit targets |
-| Mode | Infection Mode |
+| **Ammo** | 150 rounds |
+| **Damage to Infected Boss** | **100 HP** damage per hit |
+| **Damage to Cosmic Boss** | **50 HP** damage per hit |
+| **Usage Rule** | 1 weapon per player; no switching after pickup |
 
-> [!NOTE]
-> Exact pellet count, spread angle, range, damage per pellet, knockback force, and ammo count are **not yet specified**. Must be approved before Milestone 6.
-
-#### Weapon 2 — Plasma SMG
+#### Weapon 2 — Cosmic Bomb (Infection Mode)
 | Property | Value |
 |---|---|
-| Type | Rapid-fire energy projectile |
-| Overheat mechanic | Heat gauge — overheating forces a cooldown pause |
-| Mode | Infection Mode |
+| **Ammo** | 150 rounds |
+| **Damage to Infected Boss** | **50 HP** damage per hit |
+| **Damage to Cosmic Boss** | **100 HP** damage per hit |
+| **Usage Rule** | 1 weapon per player; no switching after pickup |
 
-> [!NOTE]
-> Exact fire rate, damage per shot, heat gauge capacity, overheat duration, and ammo count are **not yet specified**. Must be approved before Milestone 6.
-
-#### Weapon 3 — Cryo Freeze-Ray
+#### Weapon 3 — Raybluster (Infection Mode)
 | Property | Value |
 |---|---|
-| Type | Continuous beam |
-| Effect | Stacks **50% movement speed slow** on target |
-| Mode | Infection Mode |
-
-> [!NOTE]
-> Exact beam range, slow duration, slow falloff, ammo/energy drain rate, and damage (if any) are **not yet specified**. Must be approved before Milestone 6.
+| **Ammo** | **Unlimited** ammo |
+| **Damage to Either Boss** | **500 HP** damage per hit (deals 500 HP to Infected Boss or Cosmic Boss) |
+| **Rarity** | **Very rare** arena drop |
+| **Usage Rule** | 1 weapon per player; no switching after pickup |
 
 #### Weapon 4 — Fireball Gun (Elite Mode Only)
-See [Section 3.5](#35-fireball-gun-elite-exclusive-weapon).
+See [Section 3.5](#35-fireball-gun-elite-exclusive-weapon). Exactly 100 ammo, 50 damage/shot against Demon Boss. Friendly fire OFF.
 
 ### 5.3 Damage Validation Rules
 - **Host is authoritative** for all hit detection
@@ -311,9 +322,20 @@ These two maps are completely independent. Terrain, hazards, spawn points, and b
 | Demon Boss Targeted Green Gas | 2 HP per second | Every 20.0s, lasts 30.0 seconds |
 | Fireball Gun ammo | 100 rounds | Granted to all surviving players at 200 pts |
 | Fireball Gun damage | 50 HP per shot | Direct hit damage against Demon Boss |
-| Infection grace period | 10 seconds | No infection spreading |
 | Infection 60-second rule | 60 seconds | At least 1 normal player survives continuously -> Spawn Infected Boss & normalize all players |
-| Cryo Freeze-Ray slow | 50% movement speed | Stacking |
+| Infected Boss HP | 2500 HP | Fixed; does not scale with player count |
+| World Cutting Slash | 50 damage | Missed section becomes unavailable after 3 seconds |
+| Possessed Minions | 3 enemies | Spawns 3 possessed infected mini enemies every 10s (replaces previous set) |
+| Targeted Jump | 3s warning | Targeted aerial jump with 3-second warning telegraph |
+| Cosmic Boss HP | 2500 HP | Fixed; does not scale with player count |
+| Falling Sun | Instant death crater | Falling into crater instantly eliminates player |
+| Black Hole | 15s freeze | Pulls players, freezes for 15s, returns safely to arena |
+| White Hole | 15s freeze | Throws players outside map, freezes for 15s, returns safely |
+| Hole UI countdown | 15 seconds | Countdown displayed on affected player's screen |
+| Zombie Killer ammo & dmg | 150 ammo | 100 dmg to Infected Boss; 50 dmg to Cosmic Boss |
+| Cosmic Bomb ammo & dmg | 150 ammo | 50 dmg to Infected Boss; 100 dmg to Cosmic Boss |
+| Raybluster ammo & dmg | Unlimited ammo | 500 dmg to either boss; very rare drop |
+| Weapon selection rule | 1 per player | No weapon switching allowed after pickup |
 | Sniper charge time | 1.2 seconds | Before projectile fires |
 | Max room players | 8 | Server-enforced |
 | Reconnect window | 5 seconds | Host failure during active match |
@@ -327,17 +349,19 @@ The following mechanics, numerical values, and design questions have **not** bee
 ### C.1 Missing Numerical Values (Infection Mode & Weapons)
 | Item | Needed For | Status |
 |---|---|---|
-| Infected Boss: health (HP), movement speed, ability cooldowns, damage values, hitboxes | Milestone 6 | Unspecified |
-| Cosmic Boss: health (HP), movement speed, ability cooldowns, damage values, hitboxes | Milestone 6 | Unspecified |
-| Scatter Shotgun: pellet count, spread angle, effective range, damage per pellet, knockback force, ammo count | Milestone 6 | Unspecified |
-| Plasma SMG: fire rate, projectile speed, damage per shot, heat capacity, overheat cooldown, ammo count | Milestone 6 | Unspecified |
-| Cryo Freeze-Ray: beam range, slow duration, slow falloff, energy/ammo drain rate, damage (if any) | Milestone 6 | Unspecified |
-| Quarantine Lab map dimensions, boundaries, obstacle collision boxes, and weapon spawn positions | Milestone 6 | Unspecified |
+| World Cutting Slash: slash width, orientation, and severance boundary coordinates | Milestone 6 | Unspecified |
+| Targeted Jump: impact damage upon landing and AoE radius | Milestone 6 | Unspecified |
+| Possessed mini enemies: HP, movement speed, contact damage | Milestone 6 | Unspecified |
+| Falling Sun: crater diameter/radius, crater persistence duration, and attack cooldown | Milestone 6 | Unspecified |
+| Black Hole / White Hole: cast cooldown, radius of effect, and gravitational pull/repel force | Milestone 6 | Unspecified |
+| Raybluster: exact spawn rate / rarity percentage and drop location rules | Milestone 6 | Unspecified |
+| Quarantine Lab map dimensions, obstacle collision boxes, and weapon spawn positions | Milestone 6 | Unspecified |
 
 ### C.2 Unresolved Design Contradictions & Gameplay Rules
 | Topic | Unresolved Issue / Question | Status |
 |---|---|---|
-| **Infected Boss Victory Conditions** | When Infected Boss spawns after 60s survival and players are normalized, what is the team objective and win/loss condition? (e.g., Do all normalized players cooperate to defeat the Infected Boss? Does the round end if all players die?) | Awaiting User Approval |
-| **Cosmic Boss Victory Conditions** | When Cosmic Boss spawns after all active players become infected before 60s, what is the win/loss condition? (e.g., Do infected players fight the Cosmic Boss together, or does infected status persist with a different objective?) | Awaiting User Approval |
-| **Post-Normalization Player Mechanics** | When all players normalize upon Infected Boss spawn, what are their baseline stats, weapons, and abilities? | Awaiting User Approval |
-| **Boss Targeting Rules** | How do the Infected Boss and Cosmic Boss prioritize targets among active players? | Awaiting User Approval |
+| **Initial Infection Mechanism** | The 10-second grace period and Alpha Infected player designation were **not in original concept**. How does infection initially contaminate players at match start? | Awaiting User Approval |
+| **Infected Boss Victory Conditions** | When Infected Boss spawns after 60s survival and players normalize, what constitutes match victory or defeat? (e.g. All players win if boss HP reaches 0; loss if all players eliminated?) | Awaiting User Approval |
+| **Cosmic Boss Victory Conditions** | When Cosmic Boss spawns after all active players become infected before 60s, what constitutes match victory or defeat? Do infected players cooperate against the Cosmic Boss, or is friendly fire/infection PvP still active? | Awaiting User Approval |
+| **Post-Normalization Player Loadout** | When all players normalize upon Infected Boss spawn, do they immediately spawn with / receive specific weapons if they haven't picked one up? | Awaiting User Approval |
+| **Boss Threat Targeting** | How do Infected Boss and Cosmic Boss prioritize targets among active players? | Awaiting User Approval |
