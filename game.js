@@ -2538,6 +2538,14 @@
           const isCompact = window.innerWidth <= 768 || window.innerHeight <= 550 || (window.innerWidth <= 950 && window.innerHeight < window.innerWidth);
           brandSub.style.display = isCompact ? "none" : "";
         }
+
+        // Re-apply saved HUD layout on screen resize / orientation so buttons adapt gracefully
+        if (!document.body.classList.contains("hud-editing")) {
+          const savedHud = localStorage.getItem("dodgearena_hud_layout");
+          if (savedHud) {
+            try { this.applyHudLayout(JSON.parse(savedHud)); } catch (_) {}
+          }
+        }
       };
 
       window.addEventListener("resize", resize);
@@ -3228,6 +3236,51 @@
       document.body.classList.add("hud-editing");
       document.getElementById("modal-overlay")?.classList.add("hidden");
       document.getElementById("hud-editor-overlay")?.classList.remove("hidden");
+
+      // 1. All 7 customizable HUD buttons
+      const ids = ["joystick-zone", "sprint-btn", "dash-btn", "push-btn", "emer-dodge-btn", "beam-btn", "gun-btn"];
+
+      // If a saved layout exists, apply it first
+      const savedLayout = localStorage.getItem("dodgearena_hud_layout");
+      if (savedLayout) {
+        try { this.applyHudLayout(JSON.parse(savedLayout)); } catch (e) {}
+      }
+
+      // 2. Lock ALL buttons upfront to their exact rendered screen coordinates
+      // This prevents ANY button from collapsing, shifting, or jumping when another is moved!
+      ids.forEach((id) => {
+        const el = document.getElementById(id);
+        if (el) {
+          const rect = el.getBoundingClientRect();
+          if (el.style.position !== "fixed" || !el.style.left || !el.style.top) {
+            el.style.position = "fixed";
+            el.style.left = `${rect.left}px`;
+            el.style.top = `${rect.top}px`;
+            el.style.bottom = "auto";
+            el.style.right = "auto";
+            el.style.margin = "0";
+            el.style.zIndex = "65";
+          }
+        }
+      });
+
+      // 3. Unstack buttons if any two are accidentally right on top of each other
+      for (let i = 0; i < ids.length; i++) {
+        const elA = document.getElementById(ids[i]);
+        if (!elA) continue;
+        const rectA = elA.getBoundingClientRect();
+        for (let j = i + 1; j < ids.length; j++) {
+          const elB = document.getElementById(ids[j]);
+          if (!elB) continue;
+          const rectB = elB.getBoundingClientRect();
+          const dist = Math.hypot(rectA.left - rectB.left, rectA.top - rectB.top);
+          if (dist < 15) {
+            const curLeft = parseFloat(elB.style.left) || rectB.left;
+            elB.style.left = `${Math.min(window.innerWidth - 65, curLeft + 35)}px`;
+          }
+        }
+      }
+
       this.setupHudDragAndDrop();
     }
 
@@ -3235,85 +3288,149 @@
       document.body.classList.remove("hud-editing");
       document.getElementById("hud-editor-overlay")?.classList.add("hidden");
       document.getElementById("modal-overlay")?.classList.remove("hidden");
+
+      // Re-apply saved layout or reset to cancel any unsaved movement
+      const localLayout = localStorage.getItem("dodgearena_hud_layout");
+      if (localLayout) {
+        try { this.applyHudLayout(JSON.parse(localLayout)); } catch (e) {}
+      } else {
+        this.resetHudLayout();
+      }
     }
 
     setupHudDragAndDrop() {
       if (this.hudDragInitialized) return;
       this.hudDragInitialized = true;
 
-      const elementsToDrag = [
-        document.getElementById("joystick-zone"),
-        document.getElementById("sprint-btn"),
-        document.getElementById("dash-btn"),
-        document.getElementById("push-btn"),
-        document.getElementById("emer-dodge-btn"),
-        document.getElementById("beam-btn"),
-      ].filter(Boolean);
+      const ids = ["joystick-zone", "sprint-btn", "dash-btn", "push-btn", "emer-dodge-btn", "beam-btn", "gun-btn"];
 
-      elementsToDrag.forEach((el) => {
+      ids.forEach((id) => {
+        const el = document.getElementById(id);
+        if (!el) return;
+
         let isDragging = false;
         let startX = 0, startY = 0;
         let origLeft = 0, origTop = 0;
 
-        const onPointerDown = (e) => {
-          if (!document.body.classList.contains("hud-editing")) return;
+        const onMove = (clientX, clientY) => {
+          if (!isDragging) return;
+          const dx = clientX - startX;
+          const dy = clientY - startY;
+
+          const elW = el.offsetWidth || 56;
+          const elH = el.offsetHeight || 56;
+
+          const minX = 8;
+          const maxX = Math.max(minX, window.innerWidth - elW - 8);
+          const minY = 65; // Below header
+          const maxY = Math.max(minY, window.innerHeight - elH - 8);
+
+          const newLeft = Math.max(minX, Math.min(maxX, origLeft + dx));
+          const newTop = Math.max(minY, Math.min(maxY, origTop + dy));
+
+          el.style.left = `${newLeft}px`;
+          el.style.top = `${newTop}px`;
+        };
+
+        const onEnd = () => {
+          if (!isDragging) return;
+          isDragging = false;
+          el.classList.remove("is-dragging");
+          el.style.zIndex = "65";
+
+          window.removeEventListener("pointermove", onPointerMove);
+          window.removeEventListener("pointerup", onPointerEnd);
+          window.removeEventListener("pointercancel", onPointerEnd);
+          window.removeEventListener("touchmove", onTouchMove);
+          window.removeEventListener("touchend", onTouchEnd);
+          window.removeEventListener("touchcancel", onTouchEnd);
+        };
+
+        const onPointerMove = (e) => {
           e.preventDefault();
-          e.stopPropagation();
+          onMove(e.clientX, e.clientY);
+        };
+
+        const onPointerEnd = (e) => {
+          if (e && e.pointerId !== undefined) {
+            try { el.releasePointerCapture(e.pointerId); } catch (_) {}
+          }
+          onEnd();
+        };
+
+        const onTouchMove = (e) => {
+          if (e.touches && e.touches[0]) {
+            e.preventDefault();
+            onMove(e.touches[0].clientX, e.touches[0].clientY);
+          }
+        };
+
+        const onTouchEnd = () => {
+          onEnd();
+        };
+
+        const onStart = (clientX, clientY, pointerId) => {
+          if (!document.body.classList.contains("hud-editing")) return;
 
           isDragging = true;
-          startX = e.clientX;
-          startY = e.clientY;
+          startX = clientX;
+          startY = clientY;
 
           const rect = el.getBoundingClientRect();
           origLeft = rect.left;
           origTop = rect.top;
 
-          // Make element fixed for freeform drag anywhere
           el.style.position = "fixed";
           el.style.left = `${origLeft}px`;
           el.style.top = `${origTop}px`;
           el.style.bottom = "auto";
           el.style.right = "auto";
           el.style.margin = "0";
-          el.setPointerCapture(e.pointerId);
+          el.style.zIndex = "100";
+          el.classList.add("is-dragging");
+
+          if (pointerId !== undefined) {
+            try { el.setPointerCapture(pointerId); } catch (_) {}
+          }
+
+          window.addEventListener("pointermove", onPointerMove, { passive: false });
+          window.addEventListener("pointerup", onPointerEnd);
+          window.addEventListener("pointercancel", onPointerEnd);
+          window.addEventListener("touchmove", onTouchMove, { passive: false });
+          window.addEventListener("touchend", onTouchEnd);
+          window.addEventListener("touchcancel", onTouchEnd);
         };
 
-        const onPointerMove = (e) => {
-          if (!isDragging) return;
+        el.addEventListener("pointerdown", (e) => {
+          if (!document.body.classList.contains("hud-editing")) return;
           e.preventDefault();
-          const dx = e.clientX - startX;
-          const dy = e.clientY - startY;
+          e.stopPropagation();
+          onStart(e.clientX, e.clientY, e.pointerId);
+        });
 
-          const newLeft = Math.max(10, Math.min(window.innerWidth - el.offsetWidth - 10, origLeft + dx));
-          const newTop = Math.max(60, Math.min(window.innerHeight - el.offsetHeight - 10, origTop + dy));
-
-          el.style.left = `${newLeft}px`;
-          el.style.top = `${newTop}px`;
-        };
-
-        const onPointerUp = (e) => {
-          if (!isDragging) return;
-          isDragging = false;
-          try { el.releasePointerCapture(e.pointerId); } catch (err) {}
-        };
-
-        el.addEventListener("pointerdown", onPointerDown);
-        el.addEventListener("pointermove", onPointerMove);
-        el.addEventListener("pointerup", onPointerUp);
-        el.addEventListener("pointercancel", onPointerUp);
+        el.addEventListener("touchstart", (e) => {
+          if (!document.body.classList.contains("hud-editing")) return;
+          if (e.touches && e.touches[0]) {
+            e.stopPropagation();
+            onStart(e.touches[0].clientX, e.touches[0].clientY);
+          }
+        }, { passive: false });
       });
     }
 
     saveHudLayout() {
-      const ids = ["joystick-zone", "sprint-btn", "dash-btn", "push-btn", "emer-dodge-btn", "beam-btn"];
+      const ids = ["joystick-zone", "sprint-btn", "dash-btn", "push-btn", "emer-dodge-btn", "beam-btn", "gun-btn"];
       const layout = {};
 
       ids.forEach((id) => {
         const el = document.getElementById(id);
-        if (el && el.style.position === "fixed") {
+        if (el) {
+          const rect = el.getBoundingClientRect();
+          const leftPx = el.style.position === "fixed" ? parseFloat(el.style.left) : rect.left;
+          const topPx = el.style.position === "fixed" ? parseFloat(el.style.top) : rect.top;
           layout[id] = {
-            leftPct: (parseFloat(el.style.left) / window.innerWidth) * 100,
-            topPct: (parseFloat(el.style.top) / window.innerHeight) * 100,
+            leftPct: (leftPx / window.innerWidth) * 100,
+            topPct: (topPx / window.innerHeight) * 100,
           };
         }
       });
@@ -3332,6 +3449,7 @@
       // Feedback to user
       const statusEl = document.getElementById("hud-save-status");
       if (statusEl) {
+        statusEl.innerText = "Layout saved locally & to cloud!";
         statusEl.classList.remove("hidden");
         setTimeout(() => {
           statusEl.classList.add("hidden");
@@ -3344,13 +3462,19 @@
 
     applyHudLayout(layout) {
       if (!layout) return;
-      Object.keys(layout).forEach((id) => {
+      const ids = ["joystick-zone", "sprint-btn", "dash-btn", "push-btn", "emer-dodge-btn", "beam-btn", "gun-btn"];
+      ids.forEach((id) => {
         const el = document.getElementById(id);
         const pos = layout[id];
         if (el && pos && pos.leftPct !== undefined && pos.topPct !== undefined) {
+          const elW = el.offsetWidth || 56;
+          const elH = el.offsetHeight || 56;
+          const targetLeft = Math.max(8, Math.min(window.innerWidth - elW - 8, (pos.leftPct / 100) * window.innerWidth));
+          const targetTop = Math.max(50, Math.min(window.innerHeight - elH - 8, (pos.topPct / 100) * window.innerHeight));
+
           el.style.position = "fixed";
-          el.style.left = `${(pos.leftPct / 100) * window.innerWidth}px`;
-          el.style.top = `${(pos.topPct / 100) * window.innerHeight}px`;
+          el.style.left = `${targetLeft}px`;
+          el.style.top = `${targetTop}px`;
           el.style.bottom = "auto";
           el.style.right = "auto";
           el.style.margin = "0";
@@ -3360,7 +3484,7 @@
 
     resetHudLayout() {
       localStorage.removeItem("dodgearena_hud_layout");
-      const ids = ["joystick-zone", "sprint-btn", "dash-btn", "push-btn", "emer-dodge-btn", "beam-btn"];
+      const ids = ["joystick-zone", "sprint-btn", "dash-btn", "push-btn", "emer-dodge-btn", "beam-btn", "gun-btn"];
       ids.forEach((id) => {
         const el = document.getElementById(id);
         if (el) {
@@ -3370,6 +3494,8 @@
           el.style.bottom = "";
           el.style.right = "";
           el.style.margin = "";
+          el.style.zIndex = "";
+          el.classList.remove("is-dragging");
         }
       });
 

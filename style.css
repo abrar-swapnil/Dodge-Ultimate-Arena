@@ -1330,20 +1330,60 @@ html, body {
   z-index: 75;
 }
 
-/* Editing state: make HUD elements visibly draggable */
+/* Editing state: make HUD elements visibly draggable anywhere */
 .hud-editing #mobile-controls {
-  z-index: 60;
-  pointer-events: auto;
+  position: fixed !important;
+  inset: 0 !important;
+  width: 100vw !important;
+  height: 100vh !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  z-index: 60 !important;
+  pointer-events: none !important;
+}
+
+.hud-editing #mobile-actions {
+  display: block !important;
+  pointer-events: none !important;
 }
 
 .hud-editing #joystick-zone,
 .hud-editing .ability-btn {
   pointer-events: auto !important;
-  cursor: move !important;
+  cursor: grab !important;
   outline: 2px dashed #38bdf8 !important;
   outline-offset: 4px;
   box-shadow: 0 0 16px rgba(56, 189, 248, 0.8) !important;
-  touch-action: none;
+  touch-action: none !important;
+  user-select: none !important;
+  -webkit-user-select: none !important;
+  z-index: 65 !important;
+}
+
+/* Ensure beam and gun buttons are visible and active while editing */
+.hud-editing #beam-btn,
+.hud-editing #beam-btn.hidden {
+  display: flex !important;
+  opacity: 0.95 !important;
+  visibility: visible !important;
+}
+
+.hud-editing #gun-btn,
+.hud-editing #gun-btn.locked {
+  display: flex !important;
+  opacity: 0.95 !important;
+  filter: none !important;
+  visibility: visible !important;
+}
+
+.hud-editing .ability-btn.is-dragging,
+.hud-editing #joystick-zone.is-dragging {
+  cursor: grabbing !important;
+  z-index: 100 !important;
+  transform: scale(1.15) !important;
+  outline-color: #f59e0b !important;
+  box-shadow: 0 0 25px rgba(245, 158, 11, 0.95) !important;
+  transition: transform 0.1s ease !important;
 }
 
 /* Opening Splash Screen Styling */
