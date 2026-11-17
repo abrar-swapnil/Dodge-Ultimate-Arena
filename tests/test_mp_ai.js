@@ -443,4 +443,8 @@ console.log("\n=================================================");
 console.log(`  MULTIPLAYER ENEMY AI TESTS: ${passed} PASSED, ${failed} FAILED`);
 console.log("=================================================");
 
-if (failed > 0) process.exit(1);
+if (failed > 0) {
+  process.exit(1);
+} else {
+  process.exit(0);
+}

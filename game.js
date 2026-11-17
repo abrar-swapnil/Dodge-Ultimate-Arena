@@ -156,6 +156,26 @@
            for(let i=0;i<30;i++){ ctx.beginPath(); ctx.arc(26+i*26,(i*61+20)%580,3,0,Math.PI*2); ctx.fill(); }
          }
     },
+    // --- Milestone 5A: Obsidian Crucible (Elite Mode exclusive map) ---
+    "ELITE": { name: "🔥 OBSIDIAN CRUCIBLE", bg: "#0a0205", border: "#ff6600", enemy: "#ff4400",
+         draw(ctx) {
+           // Obsidian floor cracks with lava glow
+           ctx.strokeStyle = "rgba(255,80,0,0.18)"; ctx.lineWidth = 2;
+           [[0,80,300,220],[150,0,400,180],[500,0,700,300],[700,150,800,400],[0,350,250,500],[300,500,600,600],[600,400,800,550],[200,250,500,420]].forEach(([x1,y1,x2,y2])=>{ ctx.beginPath(); ctx.moveTo(x1,y1); ctx.lineTo(x2,y2); ctx.stroke(); });
+           // Lava pools in cracks
+           ctx.fillStyle = "rgba(255,60,0,0.10)";
+           [[80,120,55,20],[450,80,70,22],[680,280,60,18],[120,420,80,25],[550,500,65,20]].forEach(([x,y,rx,ry])=>{ ctx.beginPath(); ctx.ellipse(x,y,rx,ry,0,0,Math.PI*2); ctx.fill(); });
+           // Ember sparks
+           ctx.fillStyle = "rgba(255,120,0,0.22)";
+           for(let i=0;i<18;i++){ ctx.beginPath(); ctx.arc(44+i*42,(i*67+30)%570,2+i%3,0,Math.PI*2); ctx.fill(); }
+           // Obsidian border glow
+           const grd = ctx.createLinearGradient(0,0,0,600);
+           grd.addColorStop(0,"rgba(255,80,0,0.07)");
+           grd.addColorStop(0.5,"rgba(0,0,0,0)");
+           grd.addColorStop(1,"rgba(255,80,0,0.07)");
+           ctx.fillStyle = grd; ctx.fillRect(0,0,800,600);
+         }
+    },
   };
 
   // --- Sound Synthesizer (Web Audio API) ---
@@ -4490,6 +4510,26 @@
           }
           break;
 
+        // Milestone 5A: Elite Mode heal sync (applied by host, mirrored to guests)
+        case "MP_HEAL":
+          if (this.mpState) {
+            if (msg.eventId && this.mpState.processedEvents.has(msg.eventId)) return;
+            if (msg.eventId) this.mpState.processedEvents.add(msg.eventId);
+            const target = this.mpState.players.get(msg.targetId);
+            if (target) {
+              target.hp = Math.min(target.maxHp || 100, msg.remainingHp !== undefined ? msg.remainingHp : (target.hp + (msg.amount || 0)));
+              this.floatingTexts.push(new FloatingText(target.x, target.y - 10, `+${msg.amount || 0} HP`, "#00ff88"));
+            }
+          }
+          break;
+
+        // Milestone 5A: Elite Mode team score update (host-authoritative)
+        case "MP_SCORE_UPDATE":
+          if (this.mpState && !this.isHost) {
+            if (msg.teamScore !== undefined) this.mpState.teamScore = msg.teamScore;
+          }
+          break;
+
         // Legacy connection handling (for backwards compat with 2-player mode)
         default:
           if (this.state === "PLAYING") this._handleGameplayMessage(msg);
@@ -4573,7 +4613,13 @@
         directorTimer: 0,
         processedEvents: new Set(),
         seq: 0,
-        startTime: Date.now()
+        startTime: Date.now(),
+        // --- Milestone 5A: Elite Mode foundation fields ---
+        teamScore: 0,       // shared team score (Elite only)
+        scoreActive: true,  // halts at boss spawn (Phase 5B+)
+        pickups: [],        // { id, type:"SCORE"|"HEART", x, y }
+        nextPickupId: 1,
+        elitePickupTimer: 0 // provisional spawn timer
       };
 
       const SPAWN_POINTS = [
@@ -4683,7 +4729,13 @@
         directorTimer: 0,
         processedEvents: new Set(),
         seq: 0,
-        startTime: Date.now()
+        startTime: Date.now(),
+        // --- Milestone 5A: Elite Mode foundation fields ---
+        teamScore: msg.teamScore || 0,
+        scoreActive: true,
+        pickups: [],
+        nextPickupId: msg.nextPickupId || 1,
+        elitePickupTimer: 0
       };
 
       if (Array.isArray(msg.players)) {
@@ -4763,6 +4815,14 @@
           y: Math.round(m.y * 10) / 10,
           radius: m.radius,
           armed: m.armed
+        })),
+        // Milestone 5A: Elite Mode pickup + team score sync
+        teamScore: this.mpState.teamScore || 0,
+        pickups: (this.mpState.pickups || []).map(pk => ({
+          id: pk.id,
+          type: pk.type,
+          x: Math.round(pk.x * 10) / 10,
+          y: Math.round(pk.y * 10) / 10
         }))
       };
       this._broadcastUnreliable(snapshot);
@@ -4880,6 +4940,20 @@
           armed: m.armed
         }));
       }
+
+      // Milestone 5A: Sync Elite Mode team score and pickups on guest
+      if (msg.teamScore !== undefined) {
+        this.mpState.teamScore = msg.teamScore;
+      }
+      if (Array.isArray(msg.pickups)) {
+        // Replace entire guest pickup array from authoritative snapshot
+        this.mpState.pickups = msg.pickups.map(pk => ({
+          id: pk.id,
+          type: pk.type,
+          x: pk.x,
+          y: pk.y
+        }));
+      }
     }
 
     mpApplyDamage(targetId, amount, sourceId, explicitEventId) {
@@ -4906,6 +4980,33 @@
       if (target.hp <= 0) {
         this.mpEliminatePlayer(targetId, sourceId);
       }
+      return true;
+    }
+
+    // Milestone 5A: Host-authoritative heal (heart pickups, capped at maxHp)
+    mpApplyHeal(targetId, amount, explicitEventId) {
+      if (!this.isHost || !this.mpState) return false;
+      const target = this.mpState.players.get(targetId);
+      if (!target || !target.isAlive || target.isSpectator) return false;
+
+      const eventId = explicitEventId || `heal_${targetId}_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;
+      if (this.mpState.processedEvents.has(eventId)) return false;
+      this.mpState.processedEvents.add(eventId);
+
+      const before = target.hp;
+      target.hp = Math.min(target.maxHp || 100, target.hp + amount);
+      const actual = target.hp - before;
+      if (actual > 0) {
+        this.floatingTexts.push(new FloatingText(target.x, target.y - 10, `+${actual} HP`, "#00ff88"));
+      }
+
+      this._broadcastReliable({
+        type: "MP_HEAL",
+        eventId: eventId,
+        targetId: targetId,
+        remainingHp: target.hp,
+        amount: actual
+      });
       return true;
     }
 
@@ -5095,6 +5196,93 @@
 
       enemy.targetId = bestTarget;
       return bestTarget;
+    }
+
+    // ══════════════════════════════════════════════════════════════
+    // MILESTONE 5A: Elite Mode host-authoritative pickup update
+    // Provisional spawn rates documented below (not in Appendix B):
+    //   SCORE pickup: every 3s, max 5 on field (+5 pts each)
+    //   HEART pickup: every 8s, max 3 on field (+10 HP each, capped at maxHp)
+    // These values are PROVISIONAL and require explicit approval before Appendix B.
+    // ══════════════════════════════════════════════════════════════
+    mpUpdateElite(dt) {
+      if (!this.isHost || !this.mpState) return;
+      if (this.mpState.mode !== "ELITE") return;
+      if (!this.mpState.scoreActive) return; // scoring frozen (boss phase – 5B+)
+
+      const st = this.mpState;
+      st.elitePickupTimer = (st.elitePickupTimer || 0) + dt;
+
+      // --- PROVISIONAL: Spawn score pickup every 3s (max 5) ---
+      const SCORE_INTERVAL = 3.0;   // provisional
+      const SCORE_MAX      = 5;     // provisional
+      // --- PROVISIONAL: Spawn heart pickup every 8s (max 3) ---
+      const HEART_INTERVAL = 8.0;   // provisional
+      const HEART_MAX      = 3;     // provisional
+
+      const scoreCount = st.pickups.filter(p => p.type === "SCORE").length;
+      const heartCount = st.pickups.filter(p => p.type === "HEART").length;
+
+      if (st.elitePickupTimer >= Math.min(SCORE_INTERVAL, HEART_INTERVAL)) {
+        // Spawn score pickup if below cap
+        if (scoreCount < SCORE_MAX) {
+          st.pickups.push({
+            id: st.nextPickupId++,
+            type: "SCORE",
+            x: 60 + Math.random() * (SCREEN_WIDTH  - 120),
+            y: 60 + Math.random() * (SCREEN_HEIGHT - 120)
+          });
+        }
+        // Spawn heart pickup if below cap (only on slower interval)
+        // Use elitePickupTimer check with separate heart timer tracking
+        if (heartCount < HEART_MAX && (st.eliteHeartTimer || 0) >= HEART_INTERVAL) {
+          st.pickups.push({
+            id: st.nextPickupId++,
+            type: "HEART",
+            x: 60 + Math.random() * (SCREEN_WIDTH  - 120),
+            y: 60 + Math.random() * (SCREEN_HEIGHT - 120)
+          });
+          st.eliteHeartTimer = 0;
+        }
+        st.elitePickupTimer = 0;
+      }
+      // Track heart timer independently
+      st.eliteHeartTimer = (st.eliteHeartTimer || 0) + dt;
+
+      // --- Pickup collection (host checks each alive player vs each pickup) ---
+      const PICKUP_RADIUS = 22; // px — collision distance (provisional)
+      const collected = new Set();
+
+      for (const p of st.players.values()) {
+        if (!p.isAlive || p.isSpectator) continue;
+        const pcx = p.x + PLAYER_SIZE / 2;
+        const pcy = p.y + PLAYER_SIZE / 2;
+
+        for (const pk of st.pickups) {
+          if (collected.has(pk.id)) continue;
+          const dist = Math.hypot(pcx - pk.x, pcy - pk.y);
+          if (dist <= PICKUP_RADIUS) {
+            collected.add(pk.id);
+            if (pk.type === "SCORE") {
+              st.teamScore += 5;
+              this.floatingTexts.push(new FloatingText(pk.x, pk.y - 10, "+5 🏆", "#00ff88"));
+              // Broadcast authoritative score update
+              this._broadcastReliable({
+                type: "MP_SCORE_UPDATE",
+                teamScore: st.teamScore
+              });
+            } else if (pk.type === "HEART") {
+              const eventId = `heal_pk_${pk.id}_${p.id}`;
+              this.mpApplyHeal(p.id, 10, eventId);
+            }
+          }
+        }
+      }
+
+      // Remove collected pickups
+      if (collected.size > 0) {
+        st.pickups = st.pickups.filter(pk => !collected.has(pk.id));
+      }
     }
 
     mpUpdateEnemyAI(dt) {
@@ -6227,6 +6415,11 @@
           // Update Multiplayer Enemy AI
           this.mpUpdateEnemyAI(dt);
 
+          // Milestone 5A: Update Elite Mode pickups (host only)
+          if (this.mpState.mode === "ELITE") {
+            this.mpUpdateElite(dt);
+          }
+
           // Authoritative snapshot broadcast at 25Hz
           this.mpSnapshotTimer = (this.mpSnapshotTimer || 0) + dt;
           if (this.mpSnapshotTimer >= 0.04) {
@@ -6737,9 +6930,52 @@
     }
 
     // --- Rendering ---
+
+    // Milestone 5A: Draw Elite Mode score and heart pickups
+    _drawElitePickups(ctx, pickups) {
+      const t = (this.gameTime || 0);
+      for (const pk of pickups) {
+        const pulse = 0.85 + 0.15 * Math.sin(t * 4 + pk.id * 1.3);
+        ctx.save();
+        ctx.translate(pk.x, pk.y);
+        ctx.scale(pulse, pulse);
+        if (pk.type === "SCORE") {
+          // Green glowing orb — score pickup
+          ctx.shadowColor = "#00ff88";
+          ctx.shadowBlur = 14;
+          ctx.fillStyle = "#00ff88";
+          ctx.beginPath();
+          ctx.arc(0, 0, 9, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.shadowBlur = 0;
+          ctx.fillStyle = "#003311";
+          ctx.font = "bold 7px monospace";
+          ctx.textAlign = "center";
+          ctx.textBaseline = "middle";
+          ctx.fillText("+5", 0, 0);
+        } else {
+          // Red heart — heal pickup
+          ctx.shadowColor = "#ff4466";
+          ctx.shadowBlur = 14;
+          ctx.fillStyle = "#ff4466";
+          ctx.font = "bold 16px sans-serif";
+          ctx.textAlign = "center";
+          ctx.textBaseline = "middle";
+          ctx.fillText("❤", 0, 0);
+          ctx.shadowBlur = 0;
+        }
+        ctx.restore();
+      }
+    }
+
     draw() {
       const ctx = this.ctx;
-      const theme = MAP_THEMES[this.mapIndex] || MAP_THEMES[1];
+
+      // Milestone 5A: Use Obsidian Crucible theme for Elite Mode MP matches
+      const isEliteMP = (this.mode === "CUSTOM_ROOM" && this.mpState && this.mpState.mode === "ELITE");
+      const theme = isEliteMP
+        ? (MAP_THEMES["ELITE"] || MAP_THEMES[1])
+        : (MAP_THEMES[this.mapIndex] || MAP_THEMES[1]);
 
       // Dynamic Map Background
       ctx.fillStyle = theme.bg;
@@ -6748,9 +6984,16 @@
       // Draw themed map decoration (no grid)
       if (theme.draw) theme.draw(ctx);
 
-      // Draw Collectibles
-      for (let i = 0; i < this.items.length; i++) {
-        this.items[i].draw(ctx, this.gameTime, IS_MOBILE);
+      // Draw Collectibles (Solo only — Elite Mode uses mpState.pickups)
+      if (!isEliteMP) {
+        for (let i = 0; i < this.items.length; i++) {
+          this.items[i].draw(ctx, this.gameTime, IS_MOBILE);
+        }
+      }
+
+      // Milestone 5A: Draw Elite Mode pickups from mpState (host-authoritative array)
+      if (isEliteMP && this.mpState && Array.isArray(this.mpState.pickups)) {
+        this._drawElitePickups(ctx, this.mpState.pickups);
       }
 
       // Draw Enemies (normal)
@@ -6813,6 +7056,31 @@
       // Draw Particles & Texts
       for (let i = 0; i < this.particles.length; i++) this.particles[i].draw(ctx);
       for (let i = 0; i < this.floatingTexts.length; i++) this.floatingTexts[i].draw(ctx);
+
+      // Milestone 5A: Elite Mode team score HUD (top-center)
+      if (isEliteMP && this.mpState && this.mpState.status === "PLAYING") {
+        ctx.save();
+        const hudW = 200, hudH = 36, hudX = (SCREEN_WIDTH - hudW) / 2, hudY = 8;
+        ctx.fillStyle = "rgba(10,2,5,0.78)";
+        ctx.strokeStyle = "#ff6600";
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        if (typeof ctx.roundRect === "function") {
+          ctx.roundRect(hudX, hudY, hudW, hudH, 7);
+        } else {
+          ctx.rect(hudX, hudY, hudW, hudH);
+        }
+        ctx.fill();
+        ctx.stroke();
+        ctx.textAlign = "center";
+        ctx.fillStyle = "#ff9900";
+        ctx.font = "bold 11px monospace, sans-serif";
+        ctx.fillText("🔥 OBSIDIAN CRUCIBLE", SCREEN_WIDTH / 2, hudY + 13);
+        ctx.fillStyle = "#00ff88";
+        ctx.font = "bold 14px monospace, sans-serif";
+        ctx.fillText(`TEAM SCORE: ${this.mpState.teamScore}`, SCREEN_WIDTH / 2, hudY + 29);
+        ctx.restore();
+      }
 
       // Solo HUD (Compact sleek badge chart top-left)
       if (this.mode === "SOLO") {
