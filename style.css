@@ -380,6 +380,26 @@ html, body {
   to { transform: scale(1.08); }
 }
 
+.gun-btn {
+  background: radial-gradient(circle at 35% 35%, #ffaa00 0%, #884400 100%);
+  box-shadow: 0 0 14px rgba(255,170,0,0.5);
+}
+.gun-btn.locked {
+  background: radial-gradient(circle at 35% 35%, #555 0%, #222 100%);
+  box-shadow: none;
+  opacity: 0.45;
+  pointer-events: none;
+}
+.gun-btn.active {
+  background: radial-gradient(circle at 35% 35%, #ffdd00 0%, #cc6600 100%);
+  box-shadow: 0 0 22px rgba(255,220,0,0.9);
+  animation: pulseGunBtn 0.6s infinite alternate;
+}
+@keyframes pulseGunBtn {
+  from { transform: scale(1.0); }
+  to { transform: scale(1.1); }
+}
+
 .btn-icon {
   font-size: 1.15rem;
   line-height: 1;

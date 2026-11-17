@@ -56,10 +56,106 @@
   };
 
   const MAP_THEMES = {
-    1: { name: "CYBER NEON", bg: "#08081a", grid: "rgba(0, 229, 255, 0.05)", border: "#00e5ff" },
-    2: { name: "CRIMSON MAGMA", bg: "#19080a", grid: "rgba(255, 51, 17, 0.08)", border: "#ff3311" },
-    3: { name: "VOID ABYSS", bg: "#10061c", grid: "rgba(170, 0, 255, 0.08)", border: "#aa00ff" },
-    4: { name: "TITAN CHAMBER", bg: "#140a18", grid: "rgba(255, 204, 0, 0.1)", border: "#ffcc00" },
+    1: { name: "NEON CITY", bg: "#07091f", border: "#00e5ff",
+         draw(ctx) {
+           // City skyline silhouette
+           ctx.fillStyle = "rgba(0,229,255,0.04)";
+           const buildings = [[0,420,80,180],[90,380,60,220],[160,400,70,200],[240,360,90,240],[340,390,50,210],[400,350,110,250],[520,375,80,225],[610,340,100,260],[720,370,70,230]];
+           buildings.forEach(([x,y,w,h])=>{ ctx.fillRect(x,y,w,h); });
+           // Stars
+           ctx.fillStyle = "rgba(255,255,255,0.4)";
+           for(let i=0;i<40;i++){ ctx.beginPath(); ctx.arc(80+i*18,20+((i*37)%80),1,0,Math.PI*2); ctx.fill(); }
+           // Glow lines
+           ctx.strokeStyle = "rgba(0,229,255,0.07)"; ctx.lineWidth = 1;
+           for(let y=0;y<600;y+=60){ ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(800,y); ctx.stroke(); }
+         }
+    },
+    2: { name: "LAVA FIELDS", bg: "#190800", border: "#ff4400",
+         draw(ctx) {
+           // Lava cracks
+           ctx.strokeStyle = "rgba(255,80,0,0.15)"; ctx.lineWidth = 2;
+           [[0,150,250,300],[200,0,350,200],[400,100,600,400],[600,200,800,500],[100,400,400,600],[500,350,750,600]].forEach(([x1,y1,x2,y2])=>{ ctx.beginPath(); ctx.moveTo(x1,y1); ctx.lineTo(x2,y2); ctx.stroke(); });
+           // Lava pools
+           ctx.fillStyle = "rgba(255,60,0,0.08)";
+           [[100,150,80,30],[500,200,100,40],[300,400,120,35],[650,350,90,30]].forEach(([x,y,rx,ry])=>{ ctx.beginPath(); ctx.ellipse(x,y,rx,ry,0,0,Math.PI*2); ctx.fill(); });
+         }
+    },
+    3: { name: "VOID ECLIPSE", bg: "#0d0520", border: "#aa00ff",
+         draw(ctx) {
+           // Purple nebula clouds
+           ctx.fillStyle = "rgba(100,0,200,0.06)";
+           [[200,150,180],[500,300,220],[100,400,160],[650,100,200]].forEach(([x,y,r])=>{ ctx.beginPath(); ctx.arc(x,y,r,0,Math.PI*2); ctx.fill(); });
+           // Stars
+           ctx.fillStyle = "rgba(200,150,255,0.5)";
+           for(let i=0;i<50;i++){ ctx.beginPath(); ctx.arc(16+i*16,(i*53+37)%580,1,0,Math.PI*2); ctx.fill(); }
+         }
+    },
+    4: { name: "CRYSTAL CAVE", bg: "#050e1a", border: "#00ccff",
+         draw(ctx) {
+           // Crystal spires from bottom
+           ctx.fillStyle = "rgba(0,180,255,0.07)";
+           [[50,600,30,200],[130,600,25,160],[250,600,35,230],[380,600,20,140],[470,600,30,200],[600,600,28,180],[700,600,32,210],[770,600,20,150]].forEach(([x,y,w,h])=>{ ctx.beginPath(); ctx.moveTo(x,y); ctx.lineTo(x+w/2,y-h); ctx.lineTo(x+w,y); ctx.fill(); });
+           // Reflections on ceiling
+           ctx.fillStyle = "rgba(0,220,255,0.04)";
+           [[100,0,20,80],[300,0,25,60],[500,0,30,100],[700,0,22,70]].forEach(([x,y,w,h])=>{ ctx.beginPath(); ctx.moveTo(x,y); ctx.lineTo(x+w/2,y+h); ctx.lineTo(x+w,y); ctx.fill(); });
+         }
+    },
+    5: { name: "AURORA FIELD", bg: "#020d12", border: "#00ff88",
+         draw(ctx) {
+           // Aurora bands
+           const grad = ctx.createLinearGradient(0,0,0,600);
+           grad.addColorStop(0,"rgba(0,255,136,0.05)");
+           grad.addColorStop(0.5,"rgba(0,200,255,0.03)");
+           grad.addColorStop(1,"rgba(0,0,0,0)");
+           ctx.fillStyle = grad; ctx.fillRect(0,0,800,600);
+           // Ground details
+           ctx.strokeStyle = "rgba(0,255,100,0.08)"; ctx.lineWidth = 1;
+           for(let x=0;x<800;x+=50){ ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,600); ctx.stroke(); }
+         }
+    },
+    6: { name: "STORM RUINS", bg: "#0a0a08", border: "#ffcc00",
+         draw(ctx) {
+           // Broken pillars
+           ctx.fillStyle = "rgba(200,180,0,0.07)";
+           [[60,300,30,300],[200,250,30,350],[400,280,30,320],[600,230,30,370],[730,290,30,310]].forEach(([x,y,w,h])=>{ ctx.fillRect(x,y,w,h); });
+           // Lightning streaks
+           ctx.strokeStyle = "rgba(255,220,0,0.08)"; ctx.lineWidth = 1;
+           [[0,0,200,300],[800,0,500,400],[400,0,300,250],[600,600,700,300]].forEach(([x1,y1,x2,y2])=>{ ctx.beginPath(); ctx.moveTo(x1,y1); ctx.lineTo(x2,y2); ctx.stroke(); });
+         }
+    },
+    7: { name: "DEEP OCEAN", bg: "#010d18", border: "#0088ff",
+         draw(ctx) {
+           // Bubble trails
+           ctx.fillStyle = "rgba(0,150,255,0.07)";
+           for(let i=0;i<20;i++){ ctx.beginPath(); ctx.arc(40+i*38,(i*47+60)%550,4+i%4,0,Math.PI*2); ctx.fill(); }
+           // Seaweed
+           ctx.strokeStyle = "rgba(0,200,100,0.09)"; ctx.lineWidth = 3;
+           [100,250,420,580,700].forEach(x=>{ ctx.beginPath(); ctx.moveTo(x,600); ctx.quadraticCurveTo(x+30,480,x,360); ctx.quadraticCurveTo(x-30,240,x,180); ctx.stroke(); });
+         }
+    },
+    8: { name: "INFERNO CORE", bg: "#120300", border: "#ff2200",
+         draw(ctx) {
+           // Radial heat waves
+           for(let r=50;r<400;r+=60){ ctx.strokeStyle = `rgba(255,${30+r/5},0,${0.06-r/8000})`; ctx.lineWidth=2; ctx.beginPath(); ctx.arc(400,300,r,0,Math.PI*2); ctx.stroke(); }
+           // Ember sparks
+           ctx.fillStyle = "rgba(255,100,0,0.2)";
+           for(let i=0;i<15;i++){ ctx.beginPath(); ctx.arc(50+i*50,(i*73+30)%560,2,0,Math.PI*2); ctx.fill(); }
+         }
+    },
+    9: { name: "⚠️ NIGHTMARE ZONE", bg: "#000000", border: "#ff0033",
+         draw(ctx) {
+           // Blood red cracks across screen
+           ctx.strokeStyle = "rgba(255,0,30,0.2)"; ctx.lineWidth = 2;
+           [[0,100,400,300],[800,0,300,250],[0,600,350,400],[800,500,400,350],[200,0,250,600],[600,0,550,600]].forEach(([x1,y1,x2,y2])=>{ ctx.beginPath(); ctx.moveTo(x1,y1); ctx.lineTo(x2,y2); ctx.stroke(); });
+           // Vignette darkness
+           const vg = ctx.createRadialGradient(400,300,100,400,300,500);
+           vg.addColorStop(0,"rgba(0,0,0,0)"); vg.addColorStop(1,"rgba(80,0,0,0.5)");
+           ctx.fillStyle = vg; ctx.fillRect(0,0,800,600);
+           // Red glowing particles
+           ctx.fillStyle = "rgba(255,0,0,0.15)";
+           for(let i=0;i<30;i++){ ctx.beginPath(); ctx.arc(26+i*26,(i*61+20)%580,3,0,Math.PI*2); ctx.fill(); }
+         }
+    },
   };
 
   // --- Sound Synthesizer (Web Audio API) ---
@@ -923,6 +1019,242 @@
     }
   }
 
+  // --- Solo Boss: Ashley (melee drift + burst + minion swarm) ---
+  class AshleyBoss {
+    constructor(hp = 2500) {
+      this.size = 70;
+      this.x = SCREEN_WIDTH / 2 - this.size / 2;
+      this.y = 80;
+      this.vx = 65;
+      this.maxHp = hp;
+      this.hp = hp;
+      this.isHit = 0;
+      this.burstTimer = 0;
+      this.isChargingBurst = false;
+      this.chargeTimer = 0;
+      this.burstVisual = null;
+      this.minionTimer = 0;
+      this.name = "Ashley";
+    }
+    takeDamage(amount) {
+      this.hp = Math.max(0, this.hp - amount);
+      this.isHit = 0.2;
+      return this.hp <= 0;
+    }
+    update(dt, onCaution, onBurst, spawnMinions) {
+      if (this.isHit > 0) this.isHit -= dt;
+      this.x += this.vx * dt;
+      if (this.x < 30 || this.x + this.size > SCREEN_WIDTH - 30) this.vx *= -1;
+      this.minionTimer += dt;
+      if (this.minionTimer >= 4.2) { this.minionTimer = 0; spawnMinions(this.x + this.size/2, this.y + this.size/2); }
+      this.burstTimer += dt;
+      if (!this.isChargingBurst && this.burstTimer >= 6.5) { this.isChargingBurst = true; this.chargeTimer = 2.0; onCaution(true); }
+      if (this.isChargingBurst) {
+        this.chargeTimer -= dt;
+        if (this.chargeTimer <= 0) {
+          this.isChargingBurst = false; this.burstTimer = 0; onCaution(false);
+          onBurst(this.x + this.size/2, this.y + this.size/2);
+          this.burstVisual = { x: this.x+this.size/2, y: this.y+this.size/2, radius: 10, maxRadius: 260, alpha: 1.0 };
+        }
+      }
+      if (this.burstVisual) { this.burstVisual.radius += 520*dt; this.burstVisual.alpha -= 2.2*dt; if (this.burstVisual.alpha <= 0) this.burstVisual = null; }
+    }
+    draw(ctx) {
+      const cx = this.x + this.size/2, cy = this.y + this.size/2;
+      if (this.isChargingBurst) {
+        const pulse = (2.0 - this.chargeTimer) / 2.0;
+        ctx.save(); ctx.strokeStyle = "#ff0055"; ctx.lineWidth = 3;
+        ctx.beginPath(); ctx.arc(cx, cy, 30 + pulse * 150, 0, Math.PI * 2); ctx.stroke(); ctx.restore();
+      }
+      if (this.burstVisual) {
+        ctx.save(); ctx.globalAlpha = Math.max(0, this.burstVisual.alpha);
+        ctx.strokeStyle = "#ff2244"; ctx.lineWidth = 6;
+        ctx.beginPath(); ctx.arc(this.burstVisual.x, this.burstVisual.y, this.burstVisual.radius, 0, Math.PI*2); ctx.stroke(); ctx.restore();
+      }
+      ctx.save();
+      ctx.shadowColor = this.isHit > 0 ? "#ffffff" : "#ff2244"; ctx.shadowBlur = 24;
+      ctx.fillStyle = this.isHit > 0 ? "#ffffff" : (this.isChargingBurst ? "#ffcc00" : "#ff1133");
+      ctx.fillRect(Math.round(this.x), Math.round(this.y), this.size, this.size);
+      ctx.fillStyle = "#ffffff"; ctx.beginPath(); ctx.arc(cx, cy, 14, 0, Math.PI*2); ctx.fill();
+      ctx.fillStyle = "#ff0044"; ctx.beginPath(); ctx.arc(cx, cy, 7, 0, Math.PI*2); ctx.fill();
+      ctx.fillStyle = "#ffcc00"; ctx.font = "bold 12px monospace"; ctx.textAlign = "center";
+      ctx.fillText(`👾 Ashley`, cx, this.y - 18);
+      const barW = this.size + 40, barH = 7, barX = cx - barW/2, barY = this.y - 12;
+      ctx.fillStyle = "rgba(0,0,0,0.75)"; ctx.fillRect(barX, barY, barW, barH);
+      ctx.strokeStyle = "#ffffff"; ctx.lineWidth = 1; ctx.strokeRect(barX, barY, barW, barH);
+      const hpPct = Math.max(0, this.hp / this.maxHp);
+      ctx.fillStyle = hpPct > 0.4 ? "#00ff88" : (hpPct > 0.2 ? "#ffcc00" : "#ff0044");
+      ctx.fillRect(barX, barY, barW * hpPct, barH);
+      ctx.restore();
+    }
+  }
+
+  // --- Solo Boss: Minigun Boss (fires every 10s) ---
+  class MinigunBoss {
+    constructor(hp = 2500) {
+      this.size = 75;
+      this.x = SCREEN_WIDTH / 2 + 80;
+      this.y = 90;
+      this.vx = -75;
+      this.maxHp = hp;
+      this.hp = hp;
+      this.isHit = 0;
+      this.gunTimer = 0;
+      this.bullets = []; // minigun bullets
+      this.minionTimer = 0;
+      this.name = "Gunner";
+    }
+    takeDamage(amount) {
+      this.hp = Math.max(0, this.hp - amount);
+      this.isHit = 0.2;
+      return this.hp <= 0;
+    }
+    update(dt, playerX, playerY, onGunShot, spawnMinions) {
+      if (this.isHit > 0) this.isHit -= dt;
+      this.x += this.vx * dt;
+      if (this.x < 30 || this.x + this.size > SCREEN_WIDTH - 30) this.vx *= -1;
+      // Minigun fire every 10s
+      this.gunTimer += dt;
+      if (this.gunTimer >= 10) {
+        this.gunTimer = 0;
+        const cx = this.x + this.size/2, cy = this.y + this.size/2;
+        const dx = playerX - cx, dy = playerY - cy;
+        const dist = Math.hypot(dx, dy) || 1;
+        // Fire 5 rapid bullets
+        for (let i = 0; i < 5; i++) {
+          this.bullets.push({ x: cx, y: cy, vx: (dx/dist)*220, vy: (dy/dist)*220, life: 3.0 });
+        }
+        onGunShot();
+      }
+      // Minion spawner
+      this.minionTimer += dt;
+      if (this.minionTimer >= 3.2) { this.minionTimer = 0; spawnMinions(this.x+this.size/2, this.y+this.size/2); }
+      // Update bullets
+      for (let i = this.bullets.length - 1; i >= 0; i--) {
+        const b = this.bullets[i];
+        b.x += b.vx * dt; b.y += b.vy * dt; b.life -= dt;
+        if (b.life <= 0 || b.x < 0 || b.x > SCREEN_WIDTH || b.y < 0 || b.y > SCREEN_HEIGHT) this.bullets.splice(i, 1);
+      }
+    }
+    draw(ctx) {
+      const cx = this.x + this.size/2, cy = this.y + this.size/2;
+      ctx.save();
+      ctx.shadowColor = this.isHit > 0 ? "#ffffff" : "#ff6600"; ctx.shadowBlur = 24;
+      ctx.fillStyle = this.isHit > 0 ? "#ffffff" : "#cc3300";
+      ctx.fillRect(Math.round(this.x), Math.round(this.y), this.size, this.size);
+      // Gun barrel
+      ctx.fillStyle = "#888"; ctx.fillRect(cx - 4, cy, 8, 30);
+      ctx.fillStyle = "#ffffff"; ctx.beginPath(); ctx.arc(cx, cy, 12, 0, Math.PI*2); ctx.fill();
+      ctx.fillStyle = "#ff4400"; ctx.beginPath(); ctx.arc(cx, cy, 6, 0, Math.PI*2); ctx.fill();
+      ctx.fillStyle = "#ffaa00"; ctx.font = "bold 11px monospace"; ctx.textAlign = "center";
+      ctx.fillText(`🔫 Gunner`, cx, this.y - 18);
+      const barW = this.size + 40, barH = 7, barX = cx - barW/2, barY = this.y - 12;
+      ctx.fillStyle = "rgba(0,0,0,0.75)"; ctx.fillRect(barX, barY, barW, barH);
+      ctx.strokeStyle = "#ffffff"; ctx.lineWidth = 1; ctx.strokeRect(barX, barY, barW, barH);
+      const hpPct = Math.max(0, this.hp / this.maxHp);
+      ctx.fillStyle = hpPct > 0.4 ? "#00ff88" : (hpPct > 0.2 ? "#ffcc00" : "#ff0044");
+      ctx.fillRect(barX, barY, barW * hpPct, barH);
+      // Draw bullets
+      ctx.fillStyle = "#ffcc00";
+      for (const b of this.bullets) { ctx.beginPath(); ctx.arc(b.x, b.y, 5, 0, Math.PI*2); ctx.fill(); }
+      ctx.restore();
+    }
+  }
+
+  // --- Mini Enemy (Level 5 wave) ---
+  class MiniEnemy {
+    constructor(x, y) {
+      this.x = x; this.y = y; this.size = 12; this.speed = 180; this.hp = 1;
+      this.knockbackVx = 0; this.knockbackVy = 0;
+    }
+    get rect() { return { x: Math.round(this.x), y: Math.round(this.y), w: this.size, h: this.size }; }
+    update(targetRect, dt) {
+      this.x += this.knockbackVx * dt; this.y += this.knockbackVy * dt;
+      this.knockbackVx *= Math.max(0, 1 - 5*dt); this.knockbackVy *= Math.max(0, 1 - 5*dt);
+      this.x = Math.max(5, Math.min(SCREEN_WIDTH - this.size - 5, this.x));
+      this.y = Math.max(5, Math.min(SCREEN_HEIGHT - this.size - 5, this.y));
+      const tx = targetRect.x + targetRect.w/2 - this.x - this.size/2;
+      const ty = targetRect.y + targetRect.h/2 - this.y - this.size/2;
+      const d = Math.hypot(tx, ty) || 1;
+      this.x += (tx/d) * this.speed * dt;
+      this.y += (ty/d) * this.speed * dt;
+    }
+    draw(ctx) {
+      ctx.save();
+      ctx.fillStyle = "#ff4400";
+      ctx.shadowColor = "#ff0000"; ctx.shadowBlur = 8;
+      ctx.fillRect(Math.round(this.x), Math.round(this.y), this.size, this.size);
+      ctx.restore();
+    }
+  }
+
+  // --- Mini Boss (Level 5 final wave) ---
+  class MiniBoss {
+    constructor(x, y) {
+      this.size = 45; this.x = x; this.y = y; this.vx = (Math.random() > 0.5 ? 1 : -1) * 85;
+      this.maxHp = 2000; this.hp = 2000; this.isHit = 0;
+      this.gunTimer = Math.random() * 5; // stagger
+      this.bullets = [];
+    }
+    get rect() { return { x: Math.round(this.x), y: Math.round(this.y), w: this.size, h: this.size }; }
+    takeDamage(amount) { this.hp = Math.max(0, this.hp - amount); this.isHit = 0.15; return this.hp <= 0; }
+    update(dt, playerX, playerY, onGunShot) {
+      if (this.isHit > 0) this.isHit -= dt;
+      this.x += this.vx * dt;
+      if (this.x < 20 || this.x + this.size > SCREEN_WIDTH - 20) this.vx *= -1;
+      this.gunTimer += dt;
+      if (this.gunTimer >= 8) {
+        this.gunTimer = 0;
+        const cx = this.x+this.size/2, cy = this.y+this.size/2;
+        const dx = playerX-cx, dy = playerY-cy;
+        const dist = Math.hypot(dx,dy)||1;
+        this.bullets.push({ x:cx, y:cy, vx:(dx/dist)*200, vy:(dy/dist)*200, life:3 });
+        onGunShot();
+      }
+      for (let i = this.bullets.length-1; i>=0; i--) {
+        const b = this.bullets[i];
+        b.x += b.vx*dt; b.y += b.vy*dt; b.life -= dt;
+        if (b.life<=0||b.x<0||b.x>SCREEN_WIDTH||b.y<0||b.y>SCREEN_HEIGHT) this.bullets.splice(i,1);
+      }
+    }
+    draw(ctx) {
+      const cx = this.x+this.size/2, cy = this.y+this.size/2;
+      ctx.save();
+      ctx.fillStyle = this.isHit > 0 ? "#fff" : "#990033"; ctx.shadowColor="#ff0044"; ctx.shadowBlur=16;
+      ctx.fillRect(Math.round(this.x), Math.round(this.y), this.size, this.size);
+      ctx.fillStyle="#ff9900"; ctx.font="bold 10px monospace"; ctx.textAlign="center";
+      ctx.fillText("MINI-BOSS",cx,this.y-10);
+      const barW=this.size+20, barH=5, barX=cx-barW/2, barY=this.y-8;
+      ctx.fillStyle="rgba(0,0,0,0.7)"; ctx.fillRect(barX,barY,barW,barH);
+      ctx.fillStyle=this.hp/this.maxHp>0.5?"#00ff88":"#ff0044"; ctx.fillRect(barX,barY,barW*(this.hp/this.maxHp),barH);
+      ctx.fillStyle="#ffcc00";
+      for(const b of this.bullets){ ctx.beginPath(); ctx.arc(b.x,b.y,4,0,Math.PI*2); ctx.fill(); }
+      ctx.restore();
+    }
+  }
+
+  // --- AK-47 Pickup Item ---
+  class AK47Pickup {
+    constructor(x, y) { this.x = x; this.y = y; this.size = 24; this.pulse = 0; }
+    get rect() { return { x: Math.round(this.x), y: Math.round(this.y), w: this.size, h: this.size }; }
+    update(dt) { this.pulse = (this.pulse + dt * 3) % (Math.PI * 2); }
+    draw(ctx) {
+      ctx.save();
+      const scale = 1 + Math.sin(this.pulse) * 0.15;
+      const cx = this.x + this.size/2, cy = this.y + this.size/2;
+      ctx.translate(cx, cy); ctx.scale(scale, scale);
+      ctx.shadowColor="#ffcc00"; ctx.shadowBlur=20;
+      ctx.fillStyle="#ffcc00";
+      ctx.font = "bold 22px sans-serif"; ctx.textAlign="center"; ctx.textBaseline="middle";
+      ctx.fillText("🔫", 0, 0);
+      ctx.restore();
+      ctx.save();
+      ctx.fillStyle="#ffcc00"; ctx.font="bold 10px monospace"; ctx.textAlign="center";
+      ctx.fillText("AK-47 PICKUP", cx, this.y + this.size + 12);
+      ctx.restore();
+    }
+  }
+
   class Enemy {
     constructor(x, y, speed) {
       this.x = x;
@@ -1121,8 +1453,30 @@
       this.p1 = new Player("p1", "#4682ff", "Player 1");
       this.p2 = new Player("p2", "#ff5533", "Player 2");
 
-      // Boss
+      // Boss (multiplayer legacy)
       this.boss = null;
+
+      // === SOLO PROGRESSION STATE ===
+      this.soloBosses = [];        // array of AshleyBoss / MinigunBoss / MiniBoss
+      this.soloLevel = 1;          // 1-5
+      this.soloMapPhase = 1;       // 1-9 map phase tracker
+      this.hasAK47 = false;
+      this.gunEnabled = false;
+      this.ammo = 0;
+      this.playerBullets = [];     // bullets fired by player
+      this.gunCooldown = 0;        // 0.15s between shots
+      this.ak47Pickup = null;      // AK47Pickup instance
+      this.bossSpawnedForLevel = false;
+      this.soloWaveMode = false;
+      this.currentWave = 0;
+      this.waveEnemies = [];       // MiniEnemy instances
+      this.waveBosses = [];        // MiniBoss instances (wave 5 final)
+      this.waveCounts = [10, 15, 20, 25, 25];
+      this.waveCleared = false;
+      this.minigunUnlimited = false;
+      this.minigunBullets = [];    // L5 minigun
+      this.minigunCooldown = 0;
+      this.soloWon = false;
 
       // Entities
       this.enemies = [];
@@ -1622,6 +1976,11 @@
           }
         }
 
+        // G: Fire Gun (Solo)
+        if (e.code === "KeyG" && this.mode === "SOLO") {
+          this.firePlayerBullet();
+        }
+
         // Shift: Sprint (Hold to Sprint)
         if (e.key === "Shift" || e.code === "ShiftLeft" || e.code === "ShiftRight") {
           if (!myPlayer.isSprinting && myPlayer.startSprint()) {
@@ -1862,6 +2221,14 @@
         }
       };
       beamBtn?.addEventListener("pointerdown", handleBeam);
+
+      // Gun Button (Solo: fires AK-47 / Minigun)
+      const gunBtn = document.getElementById("gun-btn");
+      gunBtn?.addEventListener("pointerdown", (e) => {
+        if (e.cancelable) e.preventDefault();
+        this.sounds._init();
+        if (this.mode === "SOLO" && this.state === "PLAYING") this.firePlayerBullet();
+      });
 
       // Canvas click to restart
       this.canvas.addEventListener("click", () => {
@@ -3245,6 +3612,25 @@
       this.p2Score = 0;
       this.boss = null;
 
+      // Reset solo progression
+      this.soloLevel = 1;
+      this.soloMapPhase = 1;
+      this.soloBosses = [];
+      this.hasAK47 = false;
+      this.gunEnabled = false;
+      this.ammo = 0;
+      this.playerBullets = [];
+      this.gunCooldown = 0;
+      this.ak47Pickup = null;
+      this.bossSpawnedForLevel = false;
+      this.soloWaveMode = false;
+      this.currentWave = 0;
+      this.waveEnemies = [];
+      this.waveBosses = [];
+      this.minigunUnlimited = false;
+      this.soloWon = false;
+      this._updateGunButton();
+
       this.enemies = [];
       this.items = [];
       this.particles = [];
@@ -3347,6 +3733,13 @@
         else beamBtn.classList.add("hidden");
       }
 
+      // Show gun button only in Solo mode
+      const gunBtn = document.getElementById("gun-btn");
+      if (gunBtn) {
+        if (this.mode === "SOLO") gunBtn.style.display = "";
+        else gunBtn.style.display = "none";
+      }
+
       this.updateDodgeBadge(myPlayer.emerDodges);
     }
 
@@ -3367,76 +3760,59 @@
     }
 
     onBossDefeated() {
+      // Legacy multiplayer boss path only
       if (!this.boss) return;
       const bx = this.boss.x + this.boss.size / 2;
       const by = this.boss.y + this.boss.size / 2;
-
-      // Track boss kill stat
       if (this.gamerProfile) this.incrementStat("bossesDefeated");
-
-      // Huge explosion
-      for (let p = 0; p < 45; p++) {
-        this.particles.push(new Particle(bx, by, p % 2 === 0 ? "#ffcc00" : "#ff0044"));
-      }
-
+      for (let p = 0; p < 45; p++) this.particles.push(new Particle(bx, by, p % 2 === 0 ? "#ffcc00" : "#ff0044"));
       this.sounds.playVictory();
       this.boss = null;
       this.setCautionBanner(false);
+    }
 
-      if (this.level === 1) {
-        // Advance to Level 2
-        this.level = 2;
-        this.updateMaxLevel("SOLO", 2);
-        this.mapIndex = 1;
-        this.enemies = []; // clear old enemies
-        this.showAnnouncement("🏆 LEVEL 1 BOSS DEFEATED!", "LEVEL 2: CYBER CORE UNLOCKED (SCORE 250 FOR FINAL BOSS)!");
-        this.p1Score += 50;
-      } else if (this.level === 2) {
-        // Victory! Game Completed!
-        this.level = 3;
-        this.updateMaxLevel("SOLO", 3);
-        this.state = "VICTORY";
-        this.showAnnouncement("👑 VICTORY! YOU CONQUERED THE ARENA!", "CONGRATULATIONS! ULTIMATE DODGE CHAMPION!");
-        this.sounds.playVictory();
-      }
+    // --- SOLO: set map phase with announcement ---
+    _setSoloMap(phase, title, sub) {
+      this.soloMapPhase = phase;
+      this.mapIndex = phase; // reuse mapIndex to reference MAP_THEMES 1-9
+      if (title) this.showAnnouncement(title, sub || "");
+      this.sounds.playVictory();
+    }
+
+    // --- SOLO: Advance to next level ---
+    _advanceSoloLevel(newLevel) {
+      this.soloLevel = newLevel;
+      this.level = newLevel;
+      this.soloBosses = [];
+      this.bossSpawnedForLevel = false;
+      this.enemies = [];
+      this.setCautionBanner(false);
+      this.updateMaxLevel("SOLO", newLevel);
+    }
+
+    // --- SOLO: Fire player bullet ---
+    firePlayerBullet() {
+      if (!this.gunEnabled) return;
+      if (this.gunCooldown > 0) return;
+      const isL5 = this.soloLevel === 5 && this.minigunUnlimited;
+      if (!isL5 && this.ammo <= 0) return;
+      if (!isL5) this.ammo--;
+      const px = this.p1.x + this.p1.size/2;
+      const py = this.p1.y + this.p1.size/2;
+      // Shoot in facing direction, fallback to right
+      const fx = this.p1.facingX || 1, fy = this.p1.facingY || 0;
+      const dist = Math.hypot(fx, fy) || 1;
+      this.playerBullets.push({ x: px, y: py, vx: (fx/dist)*350, vy: (fy/dist)*350, dmg: isL5 ? 200 : 100, life: 2.0 });
+      this.gunCooldown = isL5 ? 0.08 : 0.15;
+      this.sounds.playTone(880, "square", 0.08, 0.3);
+      this.updateHUD();
     }
 
     // --- Map Transition & Milestone Checks ---
     checkProgression(score) {
-      // 1. Map 2 at 20 points
-      if (score >= 20 && this.mapIndex === 1 && this.level === 1) {
-        this.mapIndex = 2;
-        this.showAnnouncement("MAP 2 UNLOCKED!", "CRIMSON MAGMA ARENA - ENEMIES AGGRESSIVE!");
-        this.sounds.playVictory();
-      }
-      // 2. Map 3 at 50 points
-      else if (score >= 50 && this.mapIndex === 2 && this.level === 1) {
-        this.mapIndex = 3;
-        this.showAnnouncement("MAP 3 UNLOCKED!", "VOID ECLIPSE ABYSS - SPEED INCREASED!");
-        this.sounds.playVictory();
-      }
-      // 3. Map 4 & Boss Fight at 100 points
-      else if (score >= 100 && this.mapIndex === 3 && this.level === 1 && !this.boss) {
-        this.mapIndex = 4;
-        this.boss = new Boss(1);
-        this.showAnnouncement("👾 BOSS MISSION ARRIVED!", "DESTROY TITAN BOSS WITH PUSH (F) & ATTACK ORBS (⚡)!");
-        this.sounds.playWarning();
-      }
-      // If survived to 120 points without beating boss, auto advance to Level 2
-      else if (score >= 120 && this.level === 1) {
-        this.level = 2;
-        this.updateMaxLevel("SOLO", 2);
-        this.mapIndex = 1;
-        this.boss = null;
-        this.showAnnouncement("LEVEL 2 MATCH STARTED!", "CONGRATULATIONS! CHALLENGE MULTIPLIED!");
-        this.sounds.playVictory();
-      }
-      // Level 2 Progression -> Final Boss at 250 points
-      else if (this.level === 2 && score >= 250 && !this.boss) {
-        this.mapIndex = 4;
-        this.boss = new Boss(2);
-        this.showAnnouncement("⚠️ FINAL BOSS OVERLORD SPAWNED!", "DEFEAT THE OVERLORD TO WIN THE ARENA!");
-        this.sounds.playWarning();
+      if (this.mode === "SOLO") {
+        this._checkSoloProgression(score);
+        return;
       }
 
       // Multiplayer 25 points Giant Transformation
@@ -3479,6 +3855,126 @@
           }
         }
       }
+    }
+
+    _checkSoloProgression(score) {
+      const L = this.soloLevel;
+      if (L === 1) {
+        if (score >= 50 && this.soloMapPhase === 1) this._setSoloMap(2, "🌋 LAVA FIELDS!", "Enemies getting aggressive!");
+        if (score >= 100 && !this.bossSpawnedForLevel && this.soloBosses.length === 0) {
+          this.bossSpawnedForLevel = true;
+          this._setSoloMap(3, "👾 ASHLEY APPEARS!", "Survive to 125! Orbs give +5 during boss!");
+          this.soloBosses.push(new AshleyBoss(2500));
+          this.sounds.playWarning();
+        }
+        if (score >= 125 && this.soloLevel === 1) {
+          this._advanceSoloLevel(2);
+          this._setSoloMap(4, "🏆 LEVEL 2 UNLOCKED!", "+5pts per orb. Survive to 245!");
+        }
+      } else if (L === 2) {
+        if (score >= 162 && this.soloMapPhase === 4) this._setSoloMap(5, "☄️ AURORA FIELD!", "Two bosses incoming...");
+        if (score >= 200 && !this.bossSpawnedForLevel && this.soloBosses.length === 0) {
+          this.bossSpawnedForLevel = true;
+          this._setSoloMap(5, "⚠️ DUAL BOSS FIGHT!", "Ashley + Gunner! Survive to 245!");
+          this.soloBosses.push(new AshleyBoss(2500));
+          const g = new MinigunBoss(2500); g.x = SCREEN_WIDTH/2+80; g.y = 90;
+          this.soloBosses.push(g);
+          this.sounds.playWarning();
+        }
+        if (score >= 245 && this.soloLevel === 2) {
+          this._advanceSoloLevel(3);
+          this._setSoloMap(6, "⚡ LEVEL 3 UNLOCKED!", "+3pts per orb. Reach 317 for boss + AK-47!");
+        }
+      } else if (L === 3) {
+        if (score >= 280 && this.soloMapPhase === 6) this._setSoloMap(7, "🌊 DEEP OCEAN!", "Incoming threats...");
+        if (score >= 317 && !this.bossSpawnedForLevel && this.soloBosses.length === 0) {
+          this.bossSpawnedForLevel = true;
+          this._setSoloMap(7, "🔫 AK-47 DROPPED!", "Kill both bosses to advance! Grab the AK-47!");
+          this.soloBosses.push(new AshleyBoss(2500));
+          const g2 = new MinigunBoss(2500); g2.x = SCREEN_WIDTH-150; g2.y = 90;
+          this.soloBosses.push(g2);
+          this.ak47Pickup = new AK47Pickup(150+Math.random()*(SCREEN_WIDTH-300), 200+Math.random()*(SCREEN_HEIGHT-400));
+          this.sounds.playWarning();
+        }
+        if (this.bossSpawnedForLevel && this.soloBosses.length === 0 && this.soloLevel === 3) {
+          this._advanceSoloLevel(4);
+          this.hasAK47 = false; this.gunEnabled = false; this.ammo = 0; this.ak47Pickup = null;
+          this._setSoloMap(8, "🏆 LEVEL 4 UNLOCKED!", "+3pts. Reach 372 for Level 5!");
+          this._updateGunButton();
+        }
+      } else if (L === 4) {
+        if (score >= 372 && this.soloLevel === 4) {
+          this._advanceSoloLevel(5);
+          this._setSoloMap(9, "⚠️ NIGHTMARE ZONE!", "WAVE MODE! Minigun UNLOCKED!");
+          this.minigunUnlimited = true; this.gunEnabled = true; this.ammo = 999;
+          this.soloWaveMode = true; this.currentWave = 0;
+          this.waveEnemies = []; this.waveBosses = [];
+          this._startNextWave(); this._updateGunButton();
+        }
+      }
+    }
+
+    _startNextWave() {
+      this.currentWave++;
+      if (this.currentWave <= 5) {
+        const count = this.waveCounts[this.currentWave-1];
+        this.waveEnemies = [];
+        for (let i = 0; i < count; i++) {
+          const side = Math.floor(Math.random()*4);
+          let x=0, y=0;
+          if (side===0){x=Math.random()*SCREEN_WIDTH;y=-15;}
+          else if(side===1){x=Math.random()*SCREEN_WIDTH;y=SCREEN_HEIGHT+15;}
+          else if(side===2){x=-15;y=Math.random()*SCREEN_HEIGHT;}
+          else{x=SCREEN_WIDTH+15;y=Math.random()*SCREEN_HEIGHT;}
+          this.waveEnemies.push(new MiniEnemy(x,y));
+        }
+        this.showAnnouncement(`⚡ WAVE ${this.currentWave}!`, `${count} enemies! Shoot them all!`);
+        this.sounds.playWarning();
+      } else {
+        this.waveBosses = [];
+        for (let i=0;i<5;i++) this.waveBosses.push(new MiniBoss(100+i*140, 80+(i%2)*60));
+        this.showAnnouncement("💀 FINAL WAVE: 5 MINI-BOSSES!", "Destroy all to WIN! 200dmg/shot!");
+        this.sounds.playWarning();
+      }
+    }
+
+    _updateGunButton() {
+      const btn = document.getElementById("gun-btn");
+      if (!btn) return;
+      if (this.gunEnabled) { btn.classList.remove("locked"); btn.classList.add("active"); }
+      else { btn.classList.remove("active"); btn.classList.add("locked"); }
+    }
+
+    _setSoloMap(phase, title, sub) {
+      this.soloMapPhase = phase;
+      this.mapIndex = phase;
+      if (title) this.showAnnouncement(title, sub||"");
+      this.sounds.playVictory();
+    }
+
+    _advanceSoloLevel(newLevel) {
+      this.soloLevel = newLevel;
+      this.level = newLevel;
+      this.soloBosses = [];
+      this.bossSpawnedForLevel = false;
+      this.enemies = [];
+      this.setCautionBanner(false);
+      this.updateMaxLevel("SOLO", newLevel);
+    }
+
+    firePlayerBullet() {
+      if (!this.gunEnabled) return;
+      if (this.gunCooldown > 0) return;
+      const isL5 = this.minigunUnlimited;
+      if (!isL5 && this.ammo <= 0) return;
+      if (!isL5) this.ammo--;
+      const px = this.p1.x+this.p1.size/2, py = this.p1.y+this.p1.size/2;
+      const fx = this.p1.facingX||1, fy = this.p1.facingY||0;
+      const d = Math.hypot(fx,fy)||1;
+      this.playerBullets.push({ x:px, y:py, vx:(fx/d)*350, vy:(fy/d)*350, dmg:isL5?200:100, life:2.0 });
+      this.gunCooldown = isL5 ? 0.08 : 0.15;
+      this.sounds.playTone(880,"square",0.08,0.3);
+      this.updateHUD();
     }
 
     spawnMinionSwarm(bx, by) {
@@ -3595,7 +4091,7 @@
         this.p2.update(this.p2Input.x, this.p2Input.y, dt);
       }
 
-      // Update Boss if present
+      // Update Boss if present (multiplayer legacy)
       if (this.boss) {
         this.boss.update(
           dt,
@@ -3605,13 +4101,154 @@
         );
       }
 
-      // Spawn Enemies
+      // === SOLO: Update solo bosses ===
+      if (this.mode === "SOLO") {
+        const px = this.p1.x + this.p1.size/2, py = this.p1.y + this.p1.size/2;
+
+        // Gun cooldown
+        if (this.gunCooldown > 0) this.gunCooldown = Math.max(0, this.gunCooldown - dt);
+
+        // Update AK47 pickup
+        if (this.ak47Pickup) {
+          this.ak47Pickup.update(dt);
+          const pr = this.p1.rect, ar = this.ak47Pickup.rect;
+          if (pr.x < ar.x+ar.w && pr.x+pr.w > ar.x && pr.y < ar.y+ar.h && pr.y+pr.h > ar.y) {
+            this.hasAK47 = true; this.gunEnabled = true; this.ammo = 80;
+            this.ak47Pickup = null;
+            this._updateGunButton();
+            this.showAnnouncement("🔫 AK-47 ACQUIRED!", "80 Ammo | 100 dmg/shot | Press GUN button!");
+            this.sounds.playVictory();
+          }
+        }
+
+        // Update solo bosses
+        for (let i = this.soloBosses.length - 1; i >= 0; i--) {
+          const b = this.soloBosses[i];
+          if (b instanceof AshleyBoss) {
+            b.update(dt, (show) => this.setCautionBanner(show),
+              (bx, by) => this.triggerBossBurst(bx, by),
+              (bx, by) => this.spawnMinionSwarm(bx, by));
+          } else if (b instanceof MinigunBoss) {
+            b.update(dt, px, py, () => this.sounds.playTone(220, "sawtooth", 0.3, 0.3),
+              (bx, by) => this.spawnMinionSwarm(bx, by));
+            // Check minigun bullet→player hits
+            for (let j = b.bullets.length - 1; j >= 0; j--) {
+              const bl = b.bullets[j];
+              const pr = this.p1.rect;
+              if (bl.x > pr.x && bl.x < pr.x+pr.w && bl.y > pr.y && bl.y < pr.y+pr.h) {
+                b.bullets.splice(j, 1);
+                this.handlePlayerHit(this.p1, "BULLET");
+                if (!this.p1.isAlive) return;
+              }
+            }
+          }
+        }
+
+        // Update player bullets & check solo boss hits
+        for (let i = this.playerBullets.length - 1; i >= 0; i--) {
+          const bl = this.playerBullets[i];
+          bl.x += bl.vx * dt; bl.y += bl.vy * dt; bl.life -= dt;
+          if (bl.life <= 0 || bl.x < 0 || bl.x > SCREEN_WIDTH || bl.y < 0 || bl.y > SCREEN_HEIGHT) {
+            this.playerBullets.splice(i, 1); continue;
+          }
+          let hit = false;
+          // Hit solo bosses
+          for (let j = this.soloBosses.length - 1; j >= 0; j--) {
+            const b = this.soloBosses[j];
+            if (bl.x > b.x && bl.x < b.x+b.size && bl.y > b.y && bl.y < b.y+b.size) {
+              const dead = b.takeDamage(bl.dmg);
+              this.floatingTexts.push(new FloatingText(bl.x, bl.y, `-${bl.dmg}`, "#ffcc00"));
+              if (dead) {
+                for (let p=0;p<30;p++) this.particles.push(new Particle(b.x+b.size/2, b.y+b.size/2, p%2===0?"#ffcc00":"#ff0044"));
+                this.soloBosses.splice(j, 1);
+                this.sounds.playVictory();
+                this.checkProgression(this.p1Score);
+              }
+              this.playerBullets.splice(i, 1); hit = true; break;
+            }
+          }
+          if (hit) continue;
+          // Hit wave bosses (L5)
+          for (let j = this.waveBosses.length - 1; j >= 0; j--) {
+            const mb = this.waveBosses[j];
+            if (bl.x > mb.x && bl.x < mb.x+mb.size && bl.y > mb.y && bl.y < mb.y+mb.size) {
+              const dead = mb.takeDamage(bl.dmg);
+              this.floatingTexts.push(new FloatingText(bl.x, bl.y, `-${bl.dmg}`, "#ff9900"));
+              if (dead) {
+                for (let p=0;p<20;p++) this.particles.push(new Particle(mb.x+mb.size/2, mb.y+mb.size/2, "#ffcc00"));
+                this.waveBosses.splice(j, 1);
+                this.sounds.playVictory();
+                if (this.waveBosses.length === 0) this._soloWin();
+              }
+              this.playerBullets.splice(i, 1); break;
+            }
+          }
+        }
+
+        // Level 5 wave mode update
+        if (this.soloWaveMode) {
+          // Update wave enemies
+          for (let i = this.waveEnemies.length - 1; i >= 0; i--) {
+            this.waveEnemies[i].update(this.p1.rect, dt);
+            // Player bullet hits wave enemy
+          }
+          // Check player bullets vs wave enemies
+          for (let i = this.playerBullets.length - 1; i >= 0; i--) {
+            const bl = this.playerBullets[i];
+            for (let j = this.waveEnemies.length - 1; j >= 0; j--) {
+              const me = this.waveEnemies[j];
+              if (bl.x > me.x && bl.x < me.x+me.size && bl.y > me.y && bl.y < me.y+me.size) {
+                this.waveEnemies.splice(j, 1);
+                this.playerBullets.splice(i, 1);
+                this.floatingTexts.push(new FloatingText(me.x, me.y, "💥", "#ff4400"));
+                this.sounds.playTone(440, "square", 0.05, 0.2);
+                break;
+              }
+            }
+          }
+          // Wave mini-enemies collision with player
+          for (let i = this.waveEnemies.length - 1; i >= 0; i--) {
+            const me = this.waveEnemies[i];
+            const pr = this.p1.rect;
+            if (me.x < pr.x+pr.w && me.x+me.size > pr.x && me.y < pr.y+pr.h && me.y+me.size > pr.y) {
+              if (!this.p1.isInvulnerable) {
+                this.waveEnemies.splice(i, 1);
+                this.handlePlayerHit(this.p1, "ENEMY");
+                if (!this.p1.isAlive) return;
+              }
+            }
+          }
+          // Wave cleared?
+          if (this.waveEnemies.length === 0 && this.waveBosses.length === 0 && this.currentWave <= 5) {
+            this._startNextWave();
+          }
+          // Wave mini-boss collision
+          for (const mb of this.waveBosses) {
+            mb.update(dt, px, py, () => this.sounds.playTone(220, "sawtooth", 0.3, 0.3));
+            for (let j = mb.bullets.length - 1; j >= 0; j--) {
+              const bl = mb.bullets[j];
+              const pr = this.p1.rect;
+              if (bl.x > pr.x && bl.x < pr.x+pr.w && bl.y > pr.y && bl.y < pr.y+pr.h) {
+                mb.bullets.splice(j, 1);
+                this.handlePlayerHit(this.p1, "BULLET");
+                if (!this.p1.isAlive) return;
+              }
+            }
+          }
+          // Skip normal enemy spawning in L5 wave mode
+          this.checkCollisions();
+          this.updateHUD();
+          return;
+        }
+      }
+
+      // Spawn Enemies (non-wave)
       this.enemySpawnTimer += dt;
       let spInterval = this.difficulty.spawnInterval;
-      if (this.mapIndex === 2) spInterval *= 0.85; // Faster in Magma
-      else if (this.mapIndex >= 3) spInterval *= 0.72; // Even faster in Void
+      if (this.mapIndex >= 4) spInterval *= 0.72;
+      else if (this.mapIndex >= 2) spInterval *= 0.85;
 
-      const maxEn = this.difficulty.maxEnemies + (this.mapIndex - 1) * 2;
+      const maxEn = this.difficulty.maxEnemies + Math.min(this.mapIndex - 1, 4) * 2;
       if (this.enemySpawnTimer >= spInterval && this.enemies.length < maxEn) {
         this.enemySpawnTimer = 0.0;
         this.spawnEdgeEnemy();
@@ -3667,13 +4304,22 @@
     }
 
     spawnItem() {
+      if (this.mode === "SOLO") {
+        // Variable points by level/boss state
+        let pts = 10;
+        if (this.soloLevel === 1) pts = this.soloBosses.length > 0 ? 5 : 10;
+        else if (this.soloLevel === 2) pts = 5;
+        else if (this.soloLevel >= 3) pts = 3;
+        const x = 30 + Math.random() * (SCREEN_WIDTH - 60);
+        const y = 30 + Math.random() * (SCREEN_HEIGHT - 60);
+        this.items.push(new Collectible(x, y, pts, false));
+        return;
+      }
       const x = 30 + Math.random() * (SCREEN_WIDTH - 60);
       const y = 30 + Math.random() * (SCREEN_HEIGHT - 60);
       let pts = 10;
       if (this.mapIndex === 2) pts = 15;
       else if (this.mapIndex >= 3) pts = 20;
-
-      // In Boss fight: spawn ⚡ Golden Attack Orbs
       const isAttackOrb = Boolean(this.boss);
       this.items.push(new Collectible(x, y, pts, isAttackOrb));
     }
@@ -3865,35 +4511,49 @@
       ctx.fillStyle = theme.bg;
       ctx.fillRect(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
 
-      // Grid Lines
-      ctx.strokeStyle = theme.grid;
-      ctx.lineWidth = 1;
-      for (let x = 0; x < SCREEN_WIDTH; x += 40) {
-        ctx.beginPath();
-        ctx.moveTo(x, 0);
-        ctx.lineTo(x, SCREEN_HEIGHT);
-        ctx.stroke();
-      }
-      for (let y = 0; y < SCREEN_HEIGHT; y += 40) {
-        ctx.beginPath();
-        ctx.moveTo(0, y);
-        ctx.lineTo(SCREEN_WIDTH, y);
-        ctx.stroke();
-      }
+      // Draw themed map decoration (no grid)
+      if (theme.draw) theme.draw(ctx);
 
       // Draw Collectibles
       for (let i = 0; i < this.items.length; i++) {
         this.items[i].draw(ctx, this.gameTime, IS_MOBILE);
       }
 
-      // Draw Enemies
+      // Draw Enemies (normal)
       for (let i = 0; i < this.enemies.length; i++) {
         this.enemies[i].draw(ctx, theme, IS_MOBILE);
       }
 
-      // Draw Boss
+      // Draw Boss (multiplayer legacy)
       if (this.boss) {
         this.boss.draw(ctx);
+      }
+
+      // Draw Solo bosses
+      if (this.mode === "SOLO") {
+        for (const b of this.soloBosses) b.draw(ctx);
+        // AK47 pickup
+        if (this.ak47Pickup) this.ak47Pickup.draw(ctx);
+        // Player bullets
+        ctx.fillStyle = "#ffcc00";
+        for (const bl of this.playerBullets) {
+          ctx.beginPath(); ctx.arc(bl.x, bl.y, 5, 0, Math.PI*2); ctx.fill();
+        }
+        // Wave mode enemies & bosses
+        if (this.soloWaveMode) {
+          for (const me of this.waveEnemies) me.draw(ctx);
+          for (const mb of this.waveBosses) mb.draw(ctx);
+          // Wave HUD
+          ctx.save();
+          ctx.textAlign = "center";
+          ctx.fillStyle = "#ff4400";
+          ctx.font = "bold 16px monospace";
+          const waveLabel = this.currentWave <= 5
+            ? `WAVE ${this.currentWave}/5 — Enemies: ${this.waveEnemies.length}`
+            : `FINAL BOSSES: ${this.waveBosses.length} left`;
+          ctx.fillText(waveLabel, SCREEN_WIDTH/2, 20);
+          ctx.restore();
+        }
       }
 
       // Draw Players
@@ -3915,6 +4575,18 @@
         ctx.fillStyle = "#8888b5";
         ctx.font = "14px monospace, sans-serif";
         ctx.fillText(`⚡ Emergency Dodges: ${this.p1.emerDodges}/3`, 22, 60);
+
+        // Ammo HUD
+        if (this.gunEnabled) {
+          ctx.fillStyle = this.ammo > 20 ? "#ffcc00" : "#ff4400";
+          ctx.font = "bold 14px monospace";
+          const ammoText = this.minigunUnlimited ? "🔫 MINIGUN ∞" : `🔫 Ammo: ${this.ammo}/80`;
+          ctx.fillText(ammoText, 22, 80);
+        }
+        // Level indicator
+        ctx.fillStyle = "#aaffcc";
+        ctx.font = "bold 13px monospace";
+        ctx.fillText(`Level ${this.soloLevel} | Map ${this.soloMapPhase}`, 22, this.gunEnabled ? 98 : 80);
       }
 
       // Announcement Banner
@@ -3943,6 +4615,13 @@
       }
     }
 
+    _soloWin() {
+      this.soloWon = true;
+      this.state = "VICTORY";
+      this.sounds.playVictory();
+      if (this.gamerProfile) { this.incrementStat("totalMatches"); this.updateHighScore(this.p1Score); }
+    }
+
     drawMatchOverScreen() {
       const ctx = this.ctx;
       ctx.save();
@@ -3951,7 +4630,20 @@
 
       ctx.textAlign = "center";
 
-      if (this.state === "VICTORY") {
+      if (this.state === "VICTORY" && this.mode === "SOLO" && this.soloWon) {
+        // Solo win screen
+        ctx.fillStyle = "#ffcc00";
+        ctx.font = "bold 52px monospace, sans-serif";
+        ctx.fillText("🏆 YOU WIN!", SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2 - 70);
+
+        ctx.fillStyle = "#00ff88";
+        ctx.font = "bold 22px monospace, sans-serif";
+        ctx.fillText("More level are coming.. Stay Tuned", SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2 - 20);
+
+        ctx.fillStyle = "#ffffff";
+        ctx.font = "bold 18px monospace, sans-serif";
+        ctx.fillText(`Final Score: ${this.p1Score} | All 5 Levels Conquered!`, SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2 + 20);
+      } else if (this.state === "VICTORY") {
         ctx.fillStyle = "#ffcc00";
         ctx.font = "bold 50px monospace, sans-serif";
         ctx.fillText("👑 ARENA CONQUERED!", SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2 - 50);
@@ -3966,7 +4658,7 @@
 
         ctx.fillStyle = "#ffffff";
         ctx.font = "bold 26px monospace, sans-serif";
-        ctx.fillText(`Final Score: ${this.p1Score} (Level ${this.level} - Map ${this.mapIndex})`, SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2 + 10);
+        ctx.fillText(`Final Score: ${this.p1Score} (Level ${this.soloLevel})`, SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2 + 10);
       } else {
         const myRole = (this.mode === "CUSTOM_ROOM" && this.myRole === "p2") ? "p2" : "p1";
         const myScore = (myRole === "p2") ? this.p2Score : this.p1Score;
