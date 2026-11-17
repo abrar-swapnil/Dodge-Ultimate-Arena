@@ -65,64 +65,63 @@
 ### 3.1 Overview
 **Type:** Cooperative Titan Conquest — all players fight together against environmental hazards and a final boss.
 **Map:** *Obsidian Crucible* — a dedicated Elite-only arena. Not shared with Infection Mode.
-**Win Condition:** Defeat the Demon Boss after it awakens at 200 points.
+**Win Condition:** Defeat the Demon Boss after it spawns at 200 points.
 **Loss Condition:** All players eliminated before the boss is defeated.
 
 ### 3.2 Score Thresholds & Phase Transitions
 
 > [!IMPORTANT]
-> These thresholds are exact and final. Do not alter them.
+> These thresholds and mechanics are exact and final. Do not alter them.
 
 | Global Team Score | Event |
 |---|---|
-| **30 points** | Arena smoke screens activate; first environmental hazard rotation begins |
-| **70 points** | Poison gas zones contract arena boundaries; **Fireball Gun** weapon spawns |
-| **120 points** | Grid lasers activate; **Demon Boss awakens** (Phase 1 begins) |
-| **200 points** | **Demon Boss Enrage Phase** triggers; defeating the boss achieves team Victory |
+| **30 points** | Smoke bombs activate (2s fuse, 3s duration, 20 HP damage on entry) |
+| **70 points** | Toxic gas activates (spawns every 5s, lasts 10s, deals 10 HP damage every 0.5s) |
+| **120 points** | Stop mini enemy spawning. Laser wall activates (every 15s, deals 60 HP on direct hit) |
+| **200 points** | **Demon Boss Spawns** (2500 HP). Stop toxic gas and laser walls (smoke bombs continue). Stop score collection. Give every surviving player a **Fireball Gun** (100 ammo, 50 damage/shot). |
 
 - Score is a **global team score** — all surviving players contribute to it collectively
+- Score collection stops permanently once the Demon Boss spawns at 200 points
 - Thresholds are evaluated by the host and broadcast via `PHASE_TRANSITION` on the reliable channel
 
 ### 3.3 Environmental Hazards
 
-| Hazard | Activation Threshold | Description |
-|---|---|---|
-| Smoke Screens | 30 pts | Synchronized rotating obscuration zones; reduce player visibility |
-| Gas Zones | 70 pts | Creeping poison gas contracts playable arena boundary; players outside take continuous damage |
-| Grid Lasers | 120 pts | Sweeping laser grid crosses the arena floor; contact deals burst damage |
+| Hazard | Activation Threshold | Exact Parameters | Description |
+|---|---|---|---|
+| **Smoke Bombs** | 30 pts | • Fuse: 2.0s<br>• Duration: 3.0s<br>• Damage: 20 HP on entry | Deploys periodic smoke bomb hazard zones across the arena. Persists through the final boss phase. |
+| **Toxic Gas** | 70 pts | • Spawn interval: every 5.0s<br>• Duration: 10.0s<br>• Damage: 10 HP every 0.5s | Periodic noxious clouds covering arena zones. Stops completely when Demon Boss spawns at 200 pts. |
+| **Laser Wall** | 120 pts | • Cycle interval: every 15.0s<br>• Damage: 60 HP on direct hit | Sweeping high-voltage laser barrier crossing the arena. Stops completely when Demon Boss spawns at 200 pts. |
 
-- Hazards are cumulative — once activated they remain active for the rest of the match
-- Hazard timing and positions are determined by the host and broadcast to guests
+- **Mini Enemy Spawning:** Active from match start until 120 points; mini enemy spawning stops permanently at 120 points.
+- **Hazard Lifecycle at Boss Spawn (200 pts):** Toxic gas and laser walls immediately cease. Smoke bombs remain active and continue spawning throughout the boss fight.
 
 ### 3.4 Demon Boss
 
-**Awakens at:** 120 points (Phase 1)
-**Enrages at:** 200 points (Enrage Phase)
+**Spawns at:** 200 points (Score collection halted)
+**Health:** Exactly **2500 HP** (Fixed; does not scale with player count)
 
-#### Abilities
-| Ability | Phase | Description |
-|---|---|---|
-| Flame Waves | Phase 1 & Enrage | Radiating fire wave rings expanding outward from boss position |
-| Hellfire Rain | Phase 1 & Enrage | Targeted projectile barrage at player positions |
-| Enrage Charge | Enrage only | High-speed dash charge at nearest player; significantly increased speed and damage |
+#### Abilities & Timers
+| Ability | Interval / Duration | Damage | Description |
+|---|---|---|---|
+| **Fireball** | Every 5.0s | 10 HP | High-velocity projectile launched toward targeted players. |
+| **Pink Burst Vapor** | Every 15.0s (lasts 7.0s) | 5 HP every 0.5s | Volatile expanding pink gas cloud that deals rapid tick damage. |
+| **Targeted Green Gas** | Every 20.0s (lasts 30.0s) | 2 HP per second | Lingering homing/targeted green toxic cloud applying sustained poison damage. |
 
-#### Boss Mechanics
-- Boss health scales with active player count at time of awakening
-- Boss targets the player with the highest individual score (threat priority)
-- Host is authoritative over all boss hit detection and health broadcast
-- Boss defeat triggers match Victory screen for all players
+#### Boss Combat Rules
+- Host is authoritative over all boss positioning, ability cooldowns, and hit detection
+- Boss targets the surviving player with the highest individual score contribution (threat priority)
+- Defeating the Demon Boss triggers match Victory screen for all surviving and spectating team players
 
-### 3.5 Fireball Gun (Elite-Exclusive Weapon)
-**Spawns at:** 70 points
+### 3.5 Fireball Gun (Elite Weapon Grant)
+**Granted at:** 200 points (Upon Demon Boss spawn)
+**Recipients:** Every surviving player automatically receives the Fireball Gun
 
-| Property | Value |
+| Property | Exact Value |
 |---|---|
-| Damage type | Explosive area splash |
-| Pickup | Single world-spawn pickup in the Obsidian Crucible arena |
-| Effect | Explosion damages enemies in a radius; friendly fire is OFF |
-
-> [!NOTE]
-> Exact damage values, splash radius, and cooldown for the Fireball Gun are **not yet specified** in approved documents. These must be defined and approved before Milestone 6 implementation.
+| **Ammo** | 100 rounds per player |
+| **Damage** | 50 HP damage per direct hit |
+| **Friendly Fire** | OFF (Cannot damage teammates) |
+| **Target** | Direct offensive weapon against the Demon Boss |
 
 ---
 
@@ -309,10 +308,16 @@ These two maps are completely independent. Terrain, hazards, spawn points, and b
 
 | Item | Exact Value | Notes |
 |---|---|---|
-| Elite threshold 1 | 30 pts | Smoke screens |
-| Elite threshold 2 | 70 pts | Gas zones + Fireball Gun spawn |
-| Elite threshold 3 | 120 pts | Grid lasers + Demon Boss Phase 1 |
-| Elite threshold 4 | 200 pts | Demon Boss Enrage |
+| Elite threshold 1 | 30 pts | Smoke bombs (2s fuse, 3s duration, 20 HP damage on entry) |
+| Elite threshold 2 | 70 pts | Toxic gas (every 5s, lasts 10s, 10 HP every 0.5s) |
+| Elite threshold 3 | 120 pts | Stop mini enemies. Laser wall (every 15s, 60 HP damage) |
+| Elite threshold 4 | 200 pts | Spawn Demon Boss (2500 HP). Stop gas & lasers. Stop scoring. Grant Fireball Gun. |
+| Demon Boss HP | 2500 HP | Fixed; does not scale with player count |
+| Demon Boss Fireball | 10 HP damage | Every 5.0 seconds |
+| Demon Boss Pink Burst Vapor | 5 HP every 0.5s | Every 15.0s, lasts 7.0 seconds |
+| Demon Boss Targeted Green Gas | 2 HP per second | Every 20.0s, lasts 30.0 seconds |
+| Fireball Gun ammo | 100 rounds | Granted to all surviving players at 200 pts |
+| Fireball Gun damage | 50 HP per shot | Direct hit damage against Demon Boss |
 | Infection grace period | 10 seconds | No infection spreading |
 | Infection 60-second rule | 60 seconds | Survivor threshold for Cosmic Boss branch |
 | Cryo Freeze-Ray slow | 50% movement speed | Stacking |
@@ -328,12 +333,13 @@ The following mechanics have been named but their exact numeric values have **no
 
 | Item | Needed For |
 |---|---|
-| Fireball Gun: damage, splash radius, cooldown, ammo | Milestone 6 |
+| Smoke bomb AoE radius and arena spawn positions | Milestone 5 |
+| Toxic gas cloud radius and spawn pattern | Milestone 5 |
+| Laser wall width, speed, and sweep axis | Milestone 5 |
+| Fireball Gun fire rate / shot cooldown and projectile speed | Milestone 5 |
 | Scatter Shotgun: pellet count, spread, range, damage, knockback, ammo | Milestone 6 |
 | Plasma SMG: fire rate, damage, heat capacity, overheat duration, ammo | Milestone 6 |
 | Cryo Freeze-Ray: range, slow duration, energy drain, damage (if any) | Milestone 6 |
-| Infected Boss: health, abilities, damage values | Milestone 5 |
-| Cosmic Boss: health, abilities, damage values | Milestone 5 |
-| Demon Boss: health (per player count), ability damage values | Milestone 4 |
-| Elite hazard damage per tick (gas zones, lasers) | Milestone 4 |
-| Infection weapon spawn positions on Quarantine Lab map | Milestone 5 |
+| Infected Boss: health, abilities, damage values | Milestone 6 |
+| Cosmic Boss: health, abilities, damage values | Milestone 6 |
+| Infection weapon spawn positions on Quarantine Lab map | Milestone 6 |
