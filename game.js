@@ -56,7 +56,7 @@
   };
 
   const MAP_THEMES = {
-    1: { name: "NEON CITY", bg: "#07091f", border: "#00e5ff",
+    1: { name: "NEON CITY", bg: "#07091f", border: "#00e5ff", enemy: "#00e5ff",
          draw(ctx) {
            // City skyline silhouette
            ctx.fillStyle = "rgba(0,229,255,0.04)";
@@ -70,7 +70,7 @@
            for(let y=0;y<600;y+=60){ ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(800,y); ctx.stroke(); }
          }
     },
-    2: { name: "LAVA FIELDS", bg: "#190800", border: "#ff4400",
+    2: { name: "LAVA FIELDS", bg: "#190800", border: "#ff4400", enemy: "#ff4400",
          draw(ctx) {
            // Lava cracks
            ctx.strokeStyle = "rgba(255,80,0,0.15)"; ctx.lineWidth = 2;
@@ -80,7 +80,7 @@
            [[100,150,80,30],[500,200,100,40],[300,400,120,35],[650,350,90,30]].forEach(([x,y,rx,ry])=>{ ctx.beginPath(); ctx.ellipse(x,y,rx,ry,0,0,Math.PI*2); ctx.fill(); });
          }
     },
-    3: { name: "VOID ECLIPSE", bg: "#0d0520", border: "#aa00ff",
+    3: { name: "VOID ECLIPSE", bg: "#0d0520", border: "#aa00ff", enemy: "#c033ff",
          draw(ctx) {
            // Purple nebula clouds
            ctx.fillStyle = "rgba(100,0,200,0.06)";
@@ -90,7 +90,7 @@
            for(let i=0;i<50;i++){ ctx.beginPath(); ctx.arc(16+i*16,(i*53+37)%580,1,0,Math.PI*2); ctx.fill(); }
          }
     },
-    4: { name: "CRYSTAL CAVE", bg: "#050e1a", border: "#00ccff",
+    4: { name: "CRYSTAL CAVE", bg: "#050e1a", border: "#00ccff", enemy: "#00b4ff",
          draw(ctx) {
            // Crystal spires from bottom
            ctx.fillStyle = "rgba(0,180,255,0.07)";
@@ -100,40 +100,40 @@
            [[100,0,20,80],[300,0,25,60],[500,0,30,100],[700,0,22,70]].forEach(([x,y,w,h])=>{ ctx.beginPath(); ctx.moveTo(x,y); ctx.lineTo(x+w/2,y+h); ctx.lineTo(x+w,y); ctx.fill(); });
          }
     },
-    5: { name: "AURORA FIELD", bg: "#020d12", border: "#00ff88",
+    5: { name: "AURORA FIELD", bg: "#020d12", border: "#ff33aa", enemy: "#ff33aa",
          draw(ctx) {
            // Aurora bands
            const grad = ctx.createLinearGradient(0,0,0,600);
-           grad.addColorStop(0,"rgba(0,255,136,0.05)");
+           grad.addColorStop(0,"rgba(255,51,170,0.06)");
            grad.addColorStop(0.5,"rgba(0,200,255,0.03)");
            grad.addColorStop(1,"rgba(0,0,0,0)");
            ctx.fillStyle = grad; ctx.fillRect(0,0,800,600);
            // Ground details
-           ctx.strokeStyle = "rgba(0,255,100,0.08)"; ctx.lineWidth = 1;
+           ctx.strokeStyle = "rgba(255,51,170,0.08)"; ctx.lineWidth = 1;
            for(let x=0;x<800;x+=50){ ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,600); ctx.stroke(); }
          }
     },
-    6: { name: "STORM RUINS", bg: "#0a0a08", border: "#ffcc00",
+    6: { name: "STORM RUINS", bg: "#0a0a08", border: "#ff9900", enemy: "#ff9900",
          draw(ctx) {
            // Broken pillars
-           ctx.fillStyle = "rgba(200,180,0,0.07)";
+           ctx.fillStyle = "rgba(255,153,0,0.07)";
            [[60,300,30,300],[200,250,30,350],[400,280,30,320],[600,230,30,370],[730,290,30,310]].forEach(([x,y,w,h])=>{ ctx.fillRect(x,y,w,h); });
            // Lightning streaks
-           ctx.strokeStyle = "rgba(255,220,0,0.08)"; ctx.lineWidth = 1;
+           ctx.strokeStyle = "rgba(255,180,0,0.09)"; ctx.lineWidth = 1;
            [[0,0,200,300],[800,0,500,400],[400,0,300,250],[600,600,700,300]].forEach(([x1,y1,x2,y2])=>{ ctx.beginPath(); ctx.moveTo(x1,y1); ctx.lineTo(x2,y2); ctx.stroke(); });
          }
     },
-    7: { name: "DEEP OCEAN", bg: "#010d18", border: "#0088ff",
+    7: { name: "DEEP OCEAN", bg: "#010d18", border: "#0088ff", enemy: "#0088ff",
          draw(ctx) {
            // Bubble trails
            ctx.fillStyle = "rgba(0,150,255,0.07)";
            for(let i=0;i<20;i++){ ctx.beginPath(); ctx.arc(40+i*38,(i*47+60)%550,4+i%4,0,Math.PI*2); ctx.fill(); }
            // Seaweed
-           ctx.strokeStyle = "rgba(0,200,100,0.09)"; ctx.lineWidth = 3;
+           ctx.strokeStyle = "rgba(0,150,255,0.09)"; ctx.lineWidth = 3;
            [100,250,420,580,700].forEach(x=>{ ctx.beginPath(); ctx.moveTo(x,600); ctx.quadraticCurveTo(x+30,480,x,360); ctx.quadraticCurveTo(x-30,240,x,180); ctx.stroke(); });
          }
     },
-    8: { name: "INFERNO CORE", bg: "#120300", border: "#ff2200",
+    8: { name: "INFERNO CORE", bg: "#120300", border: "#ff2200", enemy: "#ff2200",
          draw(ctx) {
            // Radial heat waves
            for(let r=50;r<400;r+=60){ ctx.strokeStyle = `rgba(255,${30+r/5},0,${0.06-r/8000})`; ctx.lineWidth=2; ctx.beginPath(); ctx.arc(400,300,r,0,Math.PI*2); ctx.stroke(); }
@@ -142,7 +142,7 @@
            for(let i=0;i<15;i++){ ctx.beginPath(); ctx.arc(50+i*50,(i*73+30)%560,2,0,Math.PI*2); ctx.fill(); }
          }
     },
-    9: { name: "⚠️ NIGHTMARE ZONE", bg: "#000000", border: "#ff0033",
+    9: { name: "⚠️ NIGHTMARE ZONE", bg: "#000000", border: "#ff0033", enemy: "#ff0033",
          draw(ctx) {
            // Blood red cracks across screen
            ctx.strokeStyle = "rgba(255,0,30,0.2)"; ctx.lineWidth = 2;
@@ -1310,11 +1310,12 @@
 
     draw(ctx, mapTheme, isMobile = false) {
       ctx.save();
+      const enemyCol = mapTheme?.enemy || (mapTheme?.border && !mapTheme.border.includes("00ff88") ? mapTheme.border : "#ff2a5f");
       if (!isMobile) {
-        ctx.shadowColor = mapTheme.border;
+        ctx.shadowColor = enemyCol;
         ctx.shadowBlur = 8;
       }
-      ctx.fillStyle = mapTheme.border;
+      ctx.fillStyle = enemyCol;
       ctx.fillRect(Math.round(this.x), Math.round(this.y), this.size, this.size);
       ctx.restore();
     }
