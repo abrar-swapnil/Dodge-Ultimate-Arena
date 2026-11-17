@@ -2459,12 +2459,13 @@
       };
       beamBtn?.addEventListener("pointerdown", handleBeam);
 
-      // Gun Button (Solo: fires AK-47 / Minigun)
+      // Gun Button (Solo: fires AK-47 / Minigun; MP Elite: fires Fireball Gun)
       const gunBtn = document.getElementById("gun-btn");
       gunBtn?.addEventListener("pointerdown", (e) => {
         if (e.cancelable) e.preventDefault();
         this.sounds._init();
         if (this.mode === "SOLO" && this.state === "PLAYING") this.firePlayerBullet();
+        else if (this.mode === "CUSTOM_ROOM" && this.mpState && this.state === "PLAYING") this.fireEliteFireball();
       });
 
       // Canvas click to restart
@@ -2511,11 +2512,13 @@
         stopGunFire();
       });
 
-      // Alt key hold
+      // Alt key hold (Solo) / KeyJ or Alt (MP Elite)
       window.addEventListener("keydown", (e) => {
         if ((e.code === "AltLeft" || e.code === "AltRight") && this.mode === "SOLO") {
           e.preventDefault();
           startGunFire();
+        } else if ((e.code === "KeyJ" || e.code === "AltLeft" || e.code === "AltRight") && this.mode === "CUSTOM_ROOM") {
+          this.fireEliteFireball();
         }
       });
       window.addEventListener("keyup", (e) => {
@@ -4541,7 +4544,13 @@
                 this.mpState.hazards.toxicGas = [];
                 this.mpState.hazards.laserWall = null;
               }
-              this.showAnnouncement("DEMON BOSS AWAKENS", "SURVIVE THE FINAL CONQUEST");
+              // Grant Fireball Gun to all surviving players
+              for (const p of this.mpState.players.values()) {
+                if (p.isAlive && !p.isSpectator) {
+                  p.fireballGun = { ammo: 100, maxAmmo: 100, damage: 50, cooldown: 0 };
+                }
+              }
+              this.showAnnouncement("DEMON BOSS AWAKENS", "FIREBALL GUNS GRANTED — 100 AMMO");
             } else if (msg.phase === 3) {
               this.showAnnouncement("CRUCIBLE OVERLOAD", "LASER WALL ACTIVATED - MINI ENEMIES HALTED");
             } else if (msg.phase === 2) {
@@ -4549,6 +4558,23 @@
             } else if (msg.phase === 1) {
               this.showAnnouncement("HAZARD WARNING", "SMOKE BOMBS DEPLOYED");
             }
+          }
+          break;
+
+        // Milestone 5C: Player shooting fireball in Elite Mode (guest -> host)
+        case "MP_SHOOT":
+          if (this.isHost && this.mpState) {
+            this.mpHandleShoot(msg.shooterId || fromPeerId, msg.x, msg.y, msg.fx, msg.fy);
+          }
+          break;
+
+        // Milestone 5C: Team victory when Demon Boss defeated
+        case "MP_MATCH_VICTORY":
+          if (this.mpState) {
+            this.mpState.status = "VICTORY";
+            this.state = "VICTORY";
+            this.sounds?.playVictory?.();
+            this.showAnnouncement("👑 ARENA CONQUERED!", "DEMON BOSS DEFEATED!");
           }
           break;
 
@@ -4653,7 +4679,14 @@
           smoke: 0,
           gas: 0,
           laser: 0
-        }
+        },
+        // --- Milestone 5C: Demon Boss & Fireball Gun fields ---
+        boss: null,
+        bossProjectiles: [],
+        bossVapors: [],
+        playerFireballs: [],
+        nextBossAttackId: 1,
+        nextFireballId: 1
       };
 
       const SPAWN_POINTS = [
@@ -4775,7 +4808,12 @@
           smokeBombs: [],
           toxicGas: [],
           laserWall: null
-        }
+        },
+        // --- Milestone 5C: Demon Boss & Fireball Gun fields ---
+        boss: null,
+        bossProjectiles: [],
+        bossVapors: [],
+        playerFireballs: []
       };
 
       if (Array.isArray(msg.players)) {
@@ -4888,7 +4926,34 @@
             width: this.mpState.hazards.laserWall.width,
             active: true
           } : null
-        }
+        },
+        // Milestone 5C: Demon Boss & Fireballs sync
+        boss: this.mpState.boss ? {
+          id: this.mpState.boss.id,
+          x: Math.round(this.mpState.boss.x * 10) / 10,
+          y: Math.round(this.mpState.boss.y * 10) / 10,
+          hp: this.mpState.boss.hp,
+          maxHp: this.mpState.boss.maxHp,
+          isAlive: this.mpState.boss.isAlive
+        } : null,
+        bossProjectiles: (this.mpState.bossProjectiles || []).map(bp => ({
+          id: bp.id,
+          type: bp.type,
+          x: Math.round(bp.x * 10) / 10,
+          y: Math.round(bp.y * 10) / 10
+        })),
+        bossVapors: (this.mpState.bossVapors || []).map(bv => ({
+          id: bv.id,
+          type: bv.type,
+          x: Math.round(bv.x * 10) / 10,
+          y: Math.round(bv.y * 10) / 10,
+          radius: bv.radius
+        })),
+        playerFireballs: (this.mpState.playerFireballs || []).map(pf => ({
+          id: pf.id,
+          x: Math.round(pf.x * 10) / 10,
+          y: Math.round(pf.y * 10) / 10
+        }))
       };
       this._broadcastUnreliable(snapshot);
     }
@@ -5031,6 +5096,27 @@
           laserWall: msg.hazards.laserWall || null
         };
       }
+
+      // Milestone 5C: Sync Demon Boss & fireballs on guest
+      if (msg.boss !== undefined) {
+        this.mpState.boss = msg.boss ? {
+          id: msg.boss.id,
+          x: msg.boss.x,
+          y: msg.boss.y,
+          hp: msg.boss.hp,
+          maxHp: msg.boss.maxHp,
+          isAlive: msg.boss.isAlive
+        } : null;
+      }
+      if (Array.isArray(msg.bossProjectiles)) {
+        this.mpState.bossProjectiles = msg.bossProjectiles;
+      }
+      if (Array.isArray(msg.bossVapors)) {
+        this.mpState.bossVapors = msg.bossVapors;
+      }
+      if (Array.isArray(msg.playerFireballs)) {
+        this.mpState.playerFireballs = msg.playerFireballs;
+      }
     }
 
     mpApplyDamage(targetId, amount, sourceId, explicitEventId) {
@@ -5144,6 +5230,37 @@
           this.mpApplyDamage(targetId, 20, casterId);
         }
       }
+    }
+
+    // Milestone 5C: Player shooting Fireball Gun in Elite Mode (Host authoritative)
+    mpHandleShoot(shooterId, sx, sy, fx, fy) {
+      if (!this.isHost || !this.mpState) return;
+      const shooter = this.mpState.players.get(shooterId);
+      if (!shooter || !shooter.isAlive || shooter.isSpectator || (shooter.suppressedTimer > 0)) return;
+      if (!shooter.fireballGun || shooter.fireballGun.ammo <= 0) return;
+
+      shooter.fireballGun.ammo--;
+      const originX = sx !== undefined ? sx : (shooter.x + PLAYER_SIZE / 2);
+      const originY = sy !== undefined ? sy : (shooter.y + PLAYER_SIZE / 2);
+      let dirX = fx !== undefined ? fx : (shooter.facingX || 1);
+      let dirY = fy !== undefined ? fy : (shooter.facingY || 0);
+      const len = Math.hypot(dirX, dirY);
+      if (len > 0.001) { dirX /= len; dirY /= len; } else { dirX = 1; dirY = 0; }
+
+      const fb = {
+        id: "pfb_" + (this.mpState.nextFireballId++),
+        shooterId: shooterId,
+        x: originX,
+        y: originY,
+        vx: dirX * 650,
+        vy: dirY * 650,
+        radius: 8,
+        damage: 50,
+        life: 2.0
+      };
+      if (!this.mpState.playerFireballs) this.mpState.playerFireballs = [];
+      this.mpState.playerFireballs.push(fb);
+      this.sounds?.playGunShot?.();
     }
 
     _handleHostDisconnectDuringMatch() {
@@ -5532,6 +5649,226 @@
       } else {
         // Laser wall not active in phases !== 3
         if (st.hazards.laserWall) st.hazards.laserWall = null;
+      }
+
+      // ── 6. Milestone 5C: Demon Boss & Boss Combat (Phase 4, 200+ pts) ──
+      if (st.currentPhase >= 4) {
+        if (!st.boss) {
+          st.boss = {
+            id: "demon_boss_1",
+            name: "DEMON BOSS",
+            x: SCREEN_WIDTH / 2,
+            y: SCREEN_HEIGHT / 2,
+            radius: 35,
+            hp: 2500,       // GDD exact: 2500 HP fixed
+            maxHp: 2500,
+            isAlive: true,
+            speed: 80,
+            targetId: null,
+            contactCooldown: 0,
+            fireballTimer: 5.0,  // GDD exact: every 5.0s, 10 damage
+            vaporTimer: 15.0,    // GDD exact: every 15.0s (lasts 7.0s), 5 damage every 0.5s
+            gasTimer: 20.0       // GDD exact: every 20.0s (lasts 30.0s), 2 damage/s
+          };
+          // Grant Fireball Gun to every surviving player (100 ammo, 50 damage)
+          for (const p of st.players.values()) {
+            if (p.isAlive && !p.isSpectator) {
+              p.fireballGun = { ammo: 100, maxAmmo: 100, damage: 50, cooldown: 0 };
+            }
+          }
+        }
+
+        if (st.boss && st.boss.isAlive) {
+          // Threat priority: targets the surviving player with highest individual score contribution
+          let bestTarget = null;
+          let maxScore = -1;
+          for (const [pId, p] of st.players) {
+            if (!p.isAlive || p.isSpectator) continue;
+            const contrib = p.scoreContribution || 0;
+            if (contrib > maxScore || bestTarget === null) {
+              maxScore = contrib;
+              bestTarget = p;
+            }
+          }
+          const target = bestTarget;
+          st.boss.targetId = target ? target.id : null;
+
+          // Boss movement
+          if (target) {
+            const dx = (target.x + PLAYER_SIZE / 2) - st.boss.x;
+            const dy = (target.y + PLAYER_SIZE / 2) - st.boss.y;
+            const dist = Math.hypot(dx, dy);
+            if (dist > 10) {
+              st.boss.x += (dx / dist) * st.boss.speed * dt;
+              st.boss.y += (dy / dist) * st.boss.speed * dt;
+            }
+            st.boss.x = Math.max(50, Math.min(SCREEN_WIDTH - 50, st.boss.x));
+            st.boss.y = Math.max(50, Math.min(SCREEN_HEIGHT - 50, st.boss.y));
+
+            // Contact damage
+            st.boss.contactCooldown = Math.max(0, (st.boss.contactCooldown || 0) - dt);
+            if (dist <= st.boss.radius + PLAYER_SIZE / 2 && st.boss.contactCooldown <= 0) {
+              st.boss.contactCooldown = 1.0;
+              this.mpApplyDamage(target.id, 20, "demon_boss_contact");
+            }
+          }
+
+          // Ability 1: Fireball (every 5.0s, 10 damage)
+          st.boss.fireballTimer = (st.boss.fireballTimer || 5.0) - dt;
+          if (st.boss.fireballTimer <= 0) {
+            st.boss.fireballTimer = 5.0;
+            if (target) {
+              const dx = (target.x + PLAYER_SIZE / 2) - st.boss.x;
+              const dy = (target.y + PLAYER_SIZE / 2) - st.boss.y;
+              const dist = Math.hypot(dx, dy);
+              const vx = dist > 0 ? (dx / dist) * 400 : 400;
+              const vy = dist > 0 ? (dy / dist) * 400 : 0;
+              if (!st.bossProjectiles) st.bossProjectiles = [];
+              st.bossProjectiles.push({
+                id: "bfb_" + (st.nextBossAttackId++),
+                type: "FIREBALL",
+                x: st.boss.x,
+                y: st.boss.y,
+                vx, vy,
+                radius: 9,
+                damage: 10, // GDD exact: 10 damage
+                life: 3.0
+              });
+              this.floatingTexts.push(new FloatingText(st.boss.x, st.boss.y - 20, "🔥 FIREBALL!", "#ff4400"));
+            }
+          }
+
+          // Ability 2: Pink Burst Vapor (every 15.0s, lasts 7.0s, 5 damage every 0.5s)
+          st.boss.vaporTimer = (st.boss.vaporTimer || 15.0) - dt;
+          if (st.boss.vaporTimer <= 0) {
+            st.boss.vaporTimer = 15.0;
+            const spawnX = target ? target.x : st.boss.x;
+            const spawnY = target ? target.y : st.boss.y;
+            if (!st.bossVapors) st.bossVapors = [];
+            st.bossVapors.push({
+              id: "bv_" + (st.nextBossAttackId++),
+              type: "PINK_BURST",
+              x: spawnX,
+              y: spawnY,
+              radius: 75,
+              duration: 7.0, // GDD exact: lasts 7.0s
+              tickTimer: 0.5,
+              tickDamage: 5   // GDD exact: 5 damage every 0.5s
+            });
+            this.floatingTexts.push(new FloatingText(spawnX, spawnY - 20, "💨 PINK VAPOR!", "#ff00aa"));
+          }
+
+          // Ability 3: Targeted Green Gas (every 20.0s, lasts 30.0s, 2 damage/s)
+          st.boss.gasTimer = (st.boss.gasTimer || 20.0) - dt;
+          if (st.boss.gasTimer <= 0) {
+            st.boss.gasTimer = 20.0;
+            if (!st.bossVapors) st.bossVapors = [];
+            st.bossVapors.push({
+              id: "tgg_" + (st.nextBossAttackId++),
+              type: "TARGETED_GREEN",
+              x: st.boss.x,
+              y: st.boss.y,
+              radius: 55,
+              duration: 30.0, // GDD exact: lasts 30.0s
+              tickTimer: 1.0,
+              tickDamage: 2,   // GDD exact: 2 damage per second
+              targetId: target ? target.id : null,
+              speed: 40
+            });
+            this.floatingTexts.push(new FloatingText(st.boss.x, st.boss.y - 20, "☠ TARGETED GREEN GAS!", "#00ff66"));
+          }
+        }
+
+        // Process Boss Projectiles
+        for (let i = (st.bossProjectiles || []).length - 1; i >= 0; i--) {
+          const bp = st.bossProjectiles[i];
+          bp.x += bp.vx * dt;
+          bp.y += bp.vy * dt;
+          bp.life -= dt;
+          let hit = false;
+          for (const [pId, p] of st.players) {
+            if (!p.isAlive || p.isSpectator) continue;
+            const dist = Math.hypot((p.x + PLAYER_SIZE / 2) - bp.x, (p.y + PLAYER_SIZE / 2) - bp.y);
+            if (dist <= bp.radius + PLAYER_SIZE / 2) {
+              this.mpApplyDamage(pId, bp.damage || 10, "boss_fireball");
+              hit = true;
+              break;
+            }
+          }
+          if (hit || bp.life <= 0 || bp.x < -20 || bp.x > SCREEN_WIDTH + 20 || bp.y < -20 || bp.y > SCREEN_HEIGHT + 20) {
+            st.bossProjectiles.splice(i, 1);
+          }
+        }
+
+        // Process Boss Vapors
+        for (let i = (st.bossVapors || []).length - 1; i >= 0; i--) {
+          const bv = st.bossVapors[i];
+          bv.duration -= dt;
+          if (bv.type === "TARGETED_GREEN" && bv.targetId) {
+            const tgt = st.players.get(bv.targetId);
+            if (tgt && tgt.isAlive && !tgt.isSpectator) {
+              const dx = (tgt.x + PLAYER_SIZE / 2) - bv.x;
+              const dy = (tgt.y + PLAYER_SIZE / 2) - bv.y;
+              const dist = Math.hypot(dx, dy);
+              if (dist > 5) {
+                bv.x += (dx / dist) * bv.speed * dt;
+                bv.y += (dy / dist) * bv.speed * dt;
+              }
+            }
+          }
+
+          bv.tickTimer -= dt;
+          if (bv.tickTimer <= 0) {
+            bv.tickTimer = (bv.type === "TARGETED_GREEN") ? 1.0 : 0.5;
+            for (const [pId, p] of st.players) {
+              if (!p.isAlive || p.isSpectator) continue;
+              const dist = Math.hypot((p.x + PLAYER_SIZE / 2) - bv.x, (p.y + PLAYER_SIZE / 2) - bv.y);
+              if (dist <= bv.radius + PLAYER_SIZE / 2) {
+                this.mpApplyDamage(pId, bv.tickDamage, bv.type === "TARGETED_GREEN" ? "boss_targeted_gas" : "boss_pink_vapor");
+              }
+            }
+          }
+          if (bv.duration <= 0) {
+            st.bossVapors.splice(i, 1);
+          }
+        }
+      }
+
+      // ── 7. Process Player Fireballs (Friendly Fire OFF, hits Demon Boss only) ──
+      for (let i = (st.playerFireballs || []).length - 1; i >= 0; i--) {
+        const pf = st.playerFireballs[i];
+        pf.x += pf.vx * dt;
+        pf.y += pf.vy * dt;
+        pf.life -= dt;
+
+        let hit = false;
+        if (st.boss && st.boss.isAlive) {
+          const dist = Math.hypot(pf.x - st.boss.x, pf.y - st.boss.y);
+          if (dist <= st.boss.radius + pf.radius) {
+            hit = true;
+            st.boss.hp = Math.max(0, st.boss.hp - (pf.damage || 50));
+            this.floatingTexts.push(new FloatingText(st.boss.x, st.boss.y - 25, `-${pf.damage || 50} HP`, "#ffcc00"));
+            if (st.boss.hp <= 0) {
+              st.boss.hp = 0;
+              st.boss.isAlive = false;
+              st.status = "VICTORY";
+              this.state = "VICTORY";
+              this._broadcastReliable({ type: "MP_MATCH_VICTORY", reason: "DEMON_BOSS_DEFEATED" });
+              this.sounds?.playVictory?.();
+              this.showAnnouncement("👑 ARENA CONQUERED!", "DEMON BOSS DEFEATED!");
+            }
+          }
+        }
+        if (hit || pf.life <= 0 || pf.x < -20 || pf.x > SCREEN_WIDTH + 20 || pf.y < -20 || pf.y > SCREEN_HEIGHT + 20) {
+          st.playerFireballs.splice(i, 1);
+        }
+      }
+
+      // Decrement player fireball weapon cooldowns
+      for (const p of st.players.values()) {
+        if (p.fireballGun && p.fireballGun.cooldown > 0) {
+          p.fireballGun.cooldown = Math.max(0, p.fireballGun.cooldown - dt);
+        }
       }
     }
 
@@ -6257,10 +6594,11 @@
         else beamBtn.classList.add("hidden");
       }
 
-      // Show gun button only in Solo mode
+      // Show gun button in Solo mode or when player has Fireball Gun in Elite mode
       const gunBtn = document.getElementById("gun-btn");
       if (gunBtn) {
-        if (this.mode === "SOLO") gunBtn.style.display = "";
+        const hasEliteGun = (this.mode === "CUSTOM_ROOM" && this.mpState && myPlayer?.fireballGun && myPlayer.fireballGun.ammo > 0);
+        if (this.mode === "SOLO" || hasEliteGun) gunBtn.style.display = "";
         else gunBtn.style.display = "none";
       }
 
@@ -6333,6 +6671,38 @@
       this.playerBullets.push({ x: px, y: py, vx: (fx/dist)*350, vy: (fy/dist)*350, dmg: isL5 ? 200 : 100, life: 2.0 });
       this.gunCooldown = isL5 ? 0.08 : 0.15;
       this.sounds.playPew();
+      this.updateHUD();
+    }
+
+    // --- MULTIPLAYER: Fire Elite Mode Fireball Gun ---
+    fireEliteFireball() {
+      if (this.mode !== "CUSTOM_ROOM" || !this.mpState || this.state !== "PLAYING") return;
+      const myId = this.peer ? this.peer.id : (this.isHost ? "host" : "guest");
+      const myP = this.mpState.players.get(myId) || (this.isHost ? this.mpState.players.values().next().value : null);
+      if (!myP || !myP.isAlive || myP.isSpectator || (myP.suppressedTimer > 0)) return;
+      if (!myP.fireballGun || myP.fireballGun.ammo <= 0 || myP.fireballGun.cooldown > 0) return;
+
+      myP.fireballGun.ammo--;
+      myP.fireballGun.cooldown = 0.25;
+
+      const fx = myP.facingX || 1;
+      const fy = myP.facingY || 0;
+      const px = myP.x + PLAYER_SIZE / 2;
+      const py = myP.y + PLAYER_SIZE / 2;
+
+      if (this.isHost) {
+        this.mpHandleShoot(myP.id, px, py, fx, fy);
+      } else {
+        this.sounds?.playGunShot?.();
+        this._broadcastReliable({
+          type: "MP_SHOOT",
+          shooterId: myP.id,
+          x: px,
+          y: py,
+          fx: fx,
+          fy: fy
+        });
+      }
       this.updateHUD();
     }
 
@@ -7308,6 +7678,148 @@
       }
     }
 
+    // Milestone 5C: Draw Demon Boss, boss projectiles, vapors, and player fireballs
+    _drawDemonBossAndCombat(ctx) {
+      if (!this.mpState) return;
+
+      // 1. Draw Boss Vapors (Pink Burst Vapor & Targeted Green Gas)
+      if (Array.isArray(this.mpState.bossVapors)) {
+        for (const bv of this.mpState.bossVapors) {
+          ctx.save();
+          const rad = bv.radius || 60;
+          if (bv.type === "PINK_BURST") {
+            const grd = ctx.createRadialGradient(bv.x, bv.y, rad * 0.15, bv.x, bv.y, rad);
+            grd.addColorStop(0, "rgba(255, 20, 160, 0.45)");
+            grd.addColorStop(0.7, "rgba(200, 10, 120, 0.25)");
+            grd.addColorStop(1, "rgba(100, 0, 60, 0)");
+            ctx.fillStyle = grd;
+            ctx.beginPath();
+            ctx.arc(bv.x, bv.y, rad, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.strokeStyle = "rgba(255, 60, 180, 0.5)";
+            ctx.lineWidth = 1.5;
+            ctx.stroke();
+          } else {
+            // Targeted Green Gas
+            const grd = ctx.createRadialGradient(bv.x, bv.y, rad * 0.15, bv.x, bv.y, rad);
+            grd.addColorStop(0, "rgba(20, 240, 80, 0.45)");
+            grd.addColorStop(0.7, "rgba(10, 180, 50, 0.25)");
+            grd.addColorStop(1, "rgba(5, 100, 20, 0)");
+            ctx.fillStyle = grd;
+            ctx.beginPath();
+            ctx.arc(bv.x, bv.y, rad, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.strokeStyle = "rgba(40, 255, 100, 0.5)";
+            ctx.lineWidth = 1.5;
+            ctx.stroke();
+          }
+          ctx.restore();
+        }
+      }
+
+      // 2. Draw Demon Boss
+      if (this.mpState.boss && this.mpState.boss.isAlive) {
+        const b = this.mpState.boss;
+        ctx.save();
+        ctx.translate(b.x, b.y);
+
+        // Fiery outer glow
+        ctx.shadowColor = "#ff2200";
+        ctx.shadowBlur = 24;
+
+        // Demon body
+        ctx.fillStyle = "#880015";
+        ctx.beginPath();
+        ctx.arc(0, 0, b.radius, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.shadowBlur = 0;
+
+        // Inner volcanic core
+        ctx.fillStyle = "#ff4400";
+        ctx.beginPath();
+        ctx.arc(0, 0, b.radius * 0.65, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Horns
+        ctx.fillStyle = "#ffcc00";
+        ctx.beginPath();
+        ctx.moveTo(-20, -18); ctx.lineTo(-28, -42); ctx.lineTo(-10, -28); ctx.fill();
+        ctx.beginPath();
+        ctx.moveTo(20, -18); ctx.lineTo(28, -42); ctx.lineTo(10, -28); ctx.fill();
+
+        // Eyes
+        ctx.fillStyle = "#ffffff";
+        ctx.beginPath();
+        ctx.arc(-11, -5, 4, 0, Math.PI * 2);
+        ctx.arc(11, -5, 4, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = "#ff0000";
+        ctx.beginPath();
+        ctx.arc(-11, -5, 2, 0, Math.PI * 2);
+        ctx.arc(11, -5, 2, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Overhead health bar
+        ctx.restore();
+        ctx.save();
+        const barW = 90;
+        const barH = 7;
+        const barX = b.x - barW / 2;
+        const barY = b.y - b.radius - 18;
+        const hpRatio = Math.max(0, b.hp / (b.maxHp || 2500));
+
+        ctx.fillStyle = "rgba(0,0,0,0.7)";
+        ctx.fillRect(barX - 1, barY - 1, barW + 2, barH + 2);
+        ctx.fillStyle = "#ff0033";
+        ctx.fillRect(barX, barY, barW * hpRatio, barH);
+        ctx.strokeStyle = "#ffcc00";
+        ctx.lineWidth = 1;
+        ctx.strokeRect(barX - 1, barY - 1, barW + 2, barH + 2);
+
+        ctx.fillStyle = "#ffffff";
+        ctx.font = "bold 9px monospace";
+        ctx.textAlign = "center";
+        ctx.fillText(`DEMON BOSS: ${b.hp}/${b.maxHp}`, b.x, barY - 3);
+        ctx.restore();
+      }
+
+      // 3. Draw Boss Projectiles (Fireballs)
+      if (Array.isArray(this.mpState.bossProjectiles)) {
+        for (const bp of this.mpState.bossProjectiles) {
+          ctx.save();
+          ctx.shadowColor = "#ff4400";
+          ctx.shadowBlur = 12;
+          ctx.fillStyle = "#ff4400";
+          ctx.beginPath();
+          ctx.arc(bp.x, bp.y, bp.radius || 9, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.fillStyle = "#ffcc00";
+          ctx.beginPath();
+          ctx.arc(bp.x, bp.y, (bp.radius || 9) * 0.5, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.restore();
+        }
+      }
+
+      // 4. Draw Player Fireballs
+      if (Array.isArray(this.mpState.playerFireballs)) {
+        for (const pf of this.mpState.playerFireballs) {
+          ctx.save();
+          ctx.shadowColor = "#00e5ff";
+          ctx.shadowBlur = 10;
+          ctx.fillStyle = "#ffdd00";
+          ctx.beginPath();
+          ctx.arc(pf.x, pf.y, pf.radius || 8, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.fillStyle = "#ffffff";
+          ctx.beginPath();
+          ctx.arc(pf.x, pf.y, (pf.radius || 8) * 0.5, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.restore();
+        }
+      }
+    }
+
     draw() {
       const ctx = this.ctx;
 
@@ -7339,6 +7851,11 @@
       // Milestone 5B: Draw Elite Mode hazards (smoke bombs, toxic gas, laser wall)
       if (isEliteMP && this.mpState && this.mpState.hazards) {
         this._drawEliteHazards(ctx, this.mpState.hazards);
+      }
+
+      // Milestone 5C: Draw Demon Boss, combat projectiles, vapors, and player fireballs
+      if (isEliteMP && this.mpState) {
+        this._drawDemonBossAndCombat(ctx);
       }
 
       // Draw Enemies (normal)
@@ -7402,12 +7919,21 @@
       for (let i = 0; i < this.particles.length; i++) this.particles[i].draw(ctx);
       for (let i = 0; i < this.floatingTexts.length; i++) this.floatingTexts[i].draw(ctx);
 
-      // Milestone 5A: Elite Mode team score HUD (top-center)
-      if (isEliteMP && this.mpState && this.mpState.status === "PLAYING") {
+      // Milestone 5A, 5B, 5C: Elite Mode HUD (top-center)
+      if (isEliteMP && this.mpState && (this.mpState.status === "PLAYING" || this.mpState.status === "VICTORY")) {
         ctx.save();
-        const hudW = 200, hudH = 36, hudX = (SCREEN_WIDTH - hudW) / 2, hudY = 8;
-        ctx.fillStyle = "rgba(10,2,5,0.78)";
-        ctx.strokeStyle = "#ff6600";
+        const hasBoss = (this.mpState.boss && this.mpState.boss.isAlive);
+        const myId = this.peer ? this.peer.id : (this.isHost ? "host" : "guest");
+        const myP = this.mpState.players.get(myId) || (this.isHost ? this.mpState.players.values().next().value : null);
+        const hasGun = myP?.fireballGun;
+
+        const hudW = hasBoss ? 230 : 200;
+        const hudH = (hasBoss && hasGun) ? 52 : (hasBoss ? 38 : 36);
+        const hudX = (SCREEN_WIDTH - hudW) / 2;
+        const hudY = 8;
+
+        ctx.fillStyle = "rgba(10,2,5,0.85)";
+        ctx.strokeStyle = hasBoss ? "#ff0033" : "#ff6600";
         ctx.lineWidth = 1.5;
         ctx.beginPath();
         if (typeof ctx.roundRect === "function") {
@@ -7418,12 +7944,27 @@
         ctx.fill();
         ctx.stroke();
         ctx.textAlign = "center";
-        ctx.fillStyle = "#ff9900";
-        ctx.font = "bold 11px monospace, sans-serif";
-        ctx.fillText("🔥 OBSIDIAN CRUCIBLE", SCREEN_WIDTH / 2, hudY + 13);
-        ctx.fillStyle = "#00ff88";
-        ctx.font = "bold 14px monospace, sans-serif";
-        ctx.fillText(`TEAM SCORE: ${this.mpState.teamScore}`, SCREEN_WIDTH / 2, hudY + 29);
+
+        if (hasBoss) {
+          ctx.fillStyle = "#ff3344";
+          ctx.font = "bold 11px monospace, sans-serif";
+          ctx.fillText("🔥 DEMON BOSS CONQUEST", SCREEN_WIDTH / 2, hudY + 13);
+          ctx.fillStyle = "#ffcc00";
+          ctx.font = "bold 13px monospace, sans-serif";
+          ctx.fillText(`BOSS HP: ${this.mpState.boss.hp} / 2500`, SCREEN_WIDTH / 2, hudY + 28);
+          if (hasGun) {
+            ctx.fillStyle = myP.fireballGun.ammo > 20 ? "#00ffea" : "#ff4444";
+            ctx.font = "bold 11px monospace, sans-serif";
+            ctx.fillText(`🔫 FIREBALL AMMO: ${myP.fireballGun.ammo}/100`, SCREEN_WIDTH / 2, hudY + 44);
+          }
+        } else {
+          ctx.fillStyle = "#ff9900";
+          ctx.font = "bold 11px monospace, sans-serif";
+          ctx.fillText("🔥 OBSIDIAN CRUCIBLE", SCREEN_WIDTH / 2, hudY + 13);
+          ctx.fillStyle = "#00ff88";
+          ctx.font = "bold 14px monospace, sans-serif";
+          ctx.fillText(`TEAM SCORE: ${this.mpState.teamScore}`, SCREEN_WIDTH / 2, hudY + 29);
+        }
         ctx.restore();
       }
 
