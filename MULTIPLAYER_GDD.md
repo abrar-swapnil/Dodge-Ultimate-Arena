@@ -140,8 +140,11 @@ Match Start
     ▼
 Mini enemies spawn into Quarantine Lab (some initially infected, others normal)
     │
-    ├─── Players touch infected enemies or infected players → Players become infected
-    │         (Infection spreads dynamically via touch rules)
+    ├─── Four Propagation Rules (Only infected entities spread infection):
+    │         ├── 1. Infected mini enemy touches normal mini enemy → Normal mini becomes infected
+    │         ├── 2. Infected mini enemy touches normal player → Normal player becomes infected
+    │         ├── 3. Infected player touches normal player → Normal player becomes infected
+    │         └── 4. Infected player touches normal mini enemy → Normal mini becomes infected
     │
     ├─── [Condition 1: At 60 seconds] At least 1 normal, non-eliminated player survives continuously?
     │         │
@@ -162,15 +165,25 @@ Mini enemies spawn into Quarantine Lab (some initially infected, others normal)
                         └── Loss Condition: Team loses when all players are eliminated
 ```
 
-### 4.3 Infection Mechanics
+### 4.3 Infection Propagation Mechanics
 
-| Mechanic | Detail |
-|---|---|
-| **Initial Infection** | At match start, mini enemies spawn; some are initially infected and others normal |
-| **Infection Touch Rules** | Direct contact with an infected mini enemy or an infected player infects a normal player |
-| **Mutation** | Tagged player immediately joins the Infected team with a speed buff |
-| **Survivor 60-Second Rule** | If at least one normal, non-eliminated player survives continuously for 60 seconds, trigger Branch 1 (Spawn Infected Boss & normalize all players) |
-| **Early Total Infection Rule** | If all active players become infected before the 60-second threshold is met, trigger Branch 2 (Spawn Cosmic Boss) |
+> [!IMPORTANT]
+> **Core Propagation Rule**: **Only infected entities can spread infection.** Normal entities cannot transmit infection to each other.
+
+All four bidirectional infection interactions operate dynamically within the arena:
+
+| # | Interaction | Touch Event | Result |
+|---|---|---|---|
+| 1 | **Infected Enemy → Normal Enemy** | Infected mini enemy touches normal mini enemy | Normal mini enemy **becomes infected** |
+| 2 | **Infected Enemy → Normal Player** | Infected mini enemy touches normal player | Normal player **becomes infected** |
+| 3 | **Infected Player → Normal Player** | Infected player touches normal player | Normal player **becomes infected** |
+| 4 | **Infected Player → Normal Enemy** | Infected player touches normal mini enemy | Normal mini enemy **becomes infected** |
+
+#### Additional Match Timing & Transition Rules
+- **Initial Infection**: At match start, mini enemies spawn into the arena; some are initially infected and others are normal.
+- **Mutation & Buff**: Tagged players immediately mutate into the Infected team and receive a speed buff.
+- **Survivor 60-Second Rule**: If at least one normal, non-eliminated player survives continuously for 60 seconds, trigger Branch 1 (Spawn Infected Boss & normalize all players).
+- **Early Total Infection Rule**: If all active players become infected before the 60-second threshold is met, trigger Branch 2 (Spawn Cosmic Boss).
 
 ### 4.4 Mutually Exclusive Boss Branches
 
@@ -332,7 +345,8 @@ These two maps are completely independent. Terrain, hazards, spawn points, and b
 | Demon Boss Targeted Green Gas | 2 HP per second | Every 20.0s, lasts 30.0 seconds |
 | Fireball Gun ammo | 100 rounds | Granted to all surviving players at 200 pts |
 | Fireball Gun damage | 50 HP per shot | Direct hit damage against Demon Boss |
-| Initial infection onset | Match start | Mini enemies spawn (some initially infected, others normal); spreads on touch |
+| Initial infection onset | Match start | Mini enemies spawn (some initially infected, others normal) |
+| Infection propagation | 4 Touch Rules | 1) Inf enemy -> norm enemy, 2) Inf enemy -> norm player, 3) Inf player -> norm player, 4) Inf player -> norm enemy. Only infected spread. |
 | Infection 60-second rule | 60 seconds | At least 1 normal player survives continuously -> Spawn Infected Boss & normalize all players |
 | Early infection threshold | Before 60s | All active players infected before 60s -> Spawn Cosmic Boss (mutually exclusive) |
 | Boss match win condition | Boss HP = 0 | Team wins when either boss is defeated |
