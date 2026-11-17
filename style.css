@@ -122,6 +122,20 @@ html, body {
   transform: translateY(-1px);
 }
 
+.master-btn {
+  background: rgba(13, 38, 33, 0.95);
+  border: 1px solid rgba(94, 234, 212, 0.5);
+  box-shadow: 0 0 10px rgba(94, 234, 212, 0.25);
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  padding: 6px 14px;
+}
+.master-btn:hover, .master-btn:active {
+  background: rgba(45, 212, 191, 0.35);
+  border-color: #5eead4;
+  box-shadow: 0 0 16px rgba(94, 234, 212, 0.55);
+}
+
 /* Boss Caution Warning Banner */
 .caution-box {
   position: absolute;
@@ -1152,6 +1166,25 @@ html, body {
   flex-direction: column;
   gap: 12px;
   margin-top: 10px;
+}
+
+.pause-settings-row {
+  display: flex;
+  gap: 10px;
+  width: 100%;
+}
+
+.pause-opt-btn {
+  flex: 1;
+  justify-content: center;
+  padding: 10px 12px;
+  font-size: 0.88rem;
+  font-weight: 600;
+  border-radius: 8px;
+}
+
+.pause-opt-btn span {
+  display: inline !important;
 }
 
 .large-btn {

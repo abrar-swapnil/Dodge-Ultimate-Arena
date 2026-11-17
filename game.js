@@ -1633,7 +1633,18 @@
         }
       });
 
-      // Menu and Top Bar
+      // Master Top-Right Button -> Auto pause and open menu/settings
+      document.getElementById("master-btn")?.addEventListener("click", () => {
+        if (this.state === "PLAYING") {
+          this.pauseGame();
+        } else if (this.state === "PAUSED") {
+          this.resumeWithCountdown();
+        } else {
+          this.showMenu();
+        }
+      });
+
+      // Menu and Top Bar options (in Pause Section)
       document.getElementById("pause-btn")?.addEventListener("click", () => this.togglePause());
       document.getElementById("menu-btn")?.addEventListener("click", () => {
         if (this.state === "PLAYING" || this.state === "PAUSED") {
@@ -1645,7 +1656,7 @@
         this.sounds._init();
         const muted = this.sounds.toggleMute();
         const btn = document.getElementById("sound-btn");
-        if (btn) btn.innerHTML = muted ? "🔇 <span>Muted</span>" : "🔊 <span>Sound</span>";
+        if (btn) btn.innerHTML = muted ? "🔇 <span>Sound: OFF</span>" : "🔊 <span>Sound: ON</span>";
       });
       document.getElementById("fullscreen-btn")?.addEventListener("click", () => {
         if (!document.fullscreenElement) document.documentElement.requestFullscreen().catch(() => {});
@@ -1976,6 +1987,10 @@
       if (this.state !== "PLAYING") return;
       this.state = "PAUSED";
       this.hasPausedMatch = true;
+      const soundBtn = document.getElementById("sound-btn");
+      if (soundBtn) {
+        soundBtn.innerHTML = this.sounds.muted ? "🔇 <span>Sound: OFF</span>" : "🔊 <span>Sound: ON</span>";
+      }
       document.getElementById("pause-overlay")?.classList.remove("hidden");
     }
 

@@ -94,17 +94,8 @@
         <span id="diff-badge" class="badge diff-normal">NORMAL</span>
       </div>
       <div class="top-buttons">
-        <button id="pause-btn" class="icon-btn" aria-label="Pause Game">
-          ⏸️ <span>Pause</span>
-        </button>
-        <button id="menu-btn" class="icon-btn" aria-label="Game Menu">
-          ☰ <span>Menu</span>
-        </button>
-        <button id="sound-btn" class="icon-btn" aria-label="Toggle sound">
-          🔊 <span>Sound</span>
-        </button>
-        <button id="fullscreen-btn" class="icon-btn" aria-label="Toggle fullscreen">
-          ⛶ <span>Fullscreen</span>
+        <button id="master-btn" class="icon-btn master-btn" aria-label="Game Menu & Pause">
+          ⚙️ <span>MENU</span>
         </button>
       </div>
     </header>
@@ -472,10 +463,20 @@
     <!-- Pause Modal Overlay -->
     <div id="pause-overlay" class="modal-backdrop hidden">
       <div class="menu-modal pause-modal">
-        <h2 class="game-logo" style="font-size: 1.8rem;">GAME PAUSED</h2>
-        <p class="tagline">Take a breath. Ready to dodge again?</p>
+        <h2 class="game-logo" style="font-size: 1.8rem;">⏸️ GAME PAUSED</h2>
+        <p class="tagline">Game is paused. Choose an option:</p>
         <div class="pause-actions">
           <button id="btn-resume-game" class="btn primary-btn large-btn">▶ RESUME GAME</button>
+
+          <div class="pause-settings-row">
+            <button id="sound-btn" class="icon-btn pause-opt-btn" aria-label="Toggle sound">
+              🔊 <span>Sound: ON</span>
+            </button>
+            <button id="fullscreen-btn" class="icon-btn pause-opt-btn" aria-label="Toggle fullscreen">
+              ⛶ <span>Fullscreen</span>
+            </button>
+          </div>
+
           <button id="btn-pause-menu" class="btn secondary-btn">🏠 MAIN MENU (Keep Match)</button>
           <button id="btn-restart-game" class="btn small-btn danger-btn">🔄 RESTART NEW MATCH</button>
         </div>
