@@ -1185,11 +1185,13 @@
         const cx = this.x + this.size/2, cy = this.y + this.size/2;
         const dx = playerX - cx, dy = playerY - cy;
         const dist = Math.hypot(dx, dy) || 1;
-        // Fire 5 rapid bullets
+        // Fire 5 rapid bullets with pew sound for each shot
         for (let i = 0; i < 5; i++) {
+          setTimeout(() => {
+            if (this.hp > 0 && typeof onGunShot === "function") onGunShot();
+          }, i * 80);
           this.bullets.push({ x: cx, y: cy, vx: (dx/dist)*220, vy: (dy/dist)*220, life: 3.0 });
         }
-        onGunShot();
       }
       // Minion spawner
       this.minionTimer += dt;
@@ -4242,7 +4244,7 @@
               (bx, by) => this.triggerBossBurst(bx, by),
               (bx, by) => this.spawnMinionSwarm(bx, by));
           } else if (b instanceof MinigunBoss) {
-            b.update(dt, px, py, () => this.sounds.playTone(220, "sawtooth", 0.3, 0.3),
+            b.update(dt, px, py, () => this.sounds.playPew(),
               (bx, by) => this.spawnMinionSwarm(bx, by));
             // Check minigun bullet→player hits
             for (let j = b.bullets.length - 1; j >= 0; j--) {
@@ -4337,7 +4339,7 @@
           }
           // Wave mini-boss collision
           for (const mb of this.waveBosses) {
-            mb.update(dt, px, py, () => this.sounds.playTone(220, "sawtooth", 0.3, 0.3));
+            mb.update(dt, px, py, () => this.sounds.playPew());
             for (let j = mb.bullets.length - 1; j >= 0; j--) {
               const bl = mb.bullets[j];
               const pr = this.p1.rect;
