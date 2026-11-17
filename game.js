@@ -2235,6 +2235,43 @@
         this.sounds._init();
         if (this.state === "MATCH_OVER") this.startMatch(this.mode);
       });
+
+      // === Left mouse hold / Alt hold → continuous gun fire (Solo) ===
+      let gunFireInterval = null;
+      const startGunFire = () => {
+        if (this.mode !== "SOLO" || this.state !== "PLAYING") return;
+        this.sounds._init();
+        this.firePlayerBullet();
+        if (!gunFireInterval) {
+          gunFireInterval = setInterval(() => {
+            if (this.mode === "SOLO" && this.state === "PLAYING") this.firePlayerBullet();
+            else stopGunFire();
+          }, 90);
+        }
+      };
+      const stopGunFire = () => {
+        clearInterval(gunFireInterval);
+        gunFireInterval = null;
+      };
+
+      // Left mouse button on canvas
+      this.canvas.addEventListener("mousedown", (e) => {
+        if (e.button === 0) startGunFire();
+      });
+      window.addEventListener("mouseup", (e) => {
+        if (e.button === 0) stopGunFire();
+      });
+
+      // Alt key hold
+      window.addEventListener("keydown", (e) => {
+        if ((e.code === "AltLeft" || e.code === "AltRight") && this.mode === "SOLO") {
+          e.preventDefault();
+          startGunFire();
+        }
+      });
+      window.addEventListener("keyup", (e) => {
+        if (e.code === "AltLeft" || e.code === "AltRight") stopGunFire();
+      });
     }
 
     updateDodgeBadge(count) {
