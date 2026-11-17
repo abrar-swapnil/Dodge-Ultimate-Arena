@@ -146,11 +146,11 @@ Match Start
     ├─── Alpha Infected tags Survivors → Survivors mutate into Infected
     │         (repeating; Infected team grows)
     │
-    ├─── [Before 60 seconds] All Survivors infected?
-    │         └─── BRANCH 1: Infected Boss spawns ──► Infected team wins if boss is defeated
+    ├─── [Condition 1: At 60 seconds] At least 1 normal, non-eliminated player survives continuously?
+    │         └─── BRANCH 1: Spawn Infected Boss & Normalize All Players (Mutually exclusive)
     │
-    └─── [At 60 seconds] At least 1 Survivor still alive?
-              └─── BRANCH 2: Cosmic Boss invades ──► Survivors win if they defeat Cosmic Boss
+    └─── [Condition 2: Before 60 seconds] All active players become infected?
+              └─── BRANCH 2: Spawn Cosmic Boss (Mutually exclusive)
 ```
 
 ### 4.3 Infection Mechanics
@@ -162,8 +162,7 @@ Match Start
 | Alpha Infected attributes | Increased movement speed; can perform melee infection strike |
 | Infection strike | Direct contact with a Survivor tags them; they mutate into Infected team |
 | Mutation | Tagged Survivor immediately joins Infected team with same speed buff |
-| Survivor 60-second rule | If **any** Survivor remains alive at the 60-second mark, the survival threshold is triggered |
-| Extraction on 60-second survival | Extraction pod and defensive power weapons deploy into the arena |
+| Survivor 60-second rule | If at least one normal, non-eliminated player survives continuously for 60 seconds, trigger Branch 1 (Spawn Infected Boss & normalize all players) |
 
 ### 4.4 Mutually Exclusive Boss Branches
 
@@ -171,26 +170,20 @@ Match Start
 > These two branches are **mutually exclusive** — only one can trigger per match. The Hive Boss terminology is incorrect and must never be used.
 
 #### Branch 1 — Infected Boss
-**Trigger condition:** The Infected team completely overtakes **all** Survivors **before** the 60-second timer expires.
-
-| Property | Detail |
-|---|---|
-| Faction | Fights alongside the Infected team against any remaining defenders |
-| Win condition | Infected team + boss defeat all remaining resistance |
+**Trigger condition:** At least one normal, non-eliminated player survives continuously for **60 seconds**.
+- Spawns the **Infected Boss**.
+- **Normalizes all players** (reverting infection state).
 
 > [!NOTE]
-> Exact Infected Boss ability names, damage values, and health values are **not yet specified** in approved documents. These must be defined and approved before Milestone 5 implementation.
+> Exact Infected Boss health, ability names, cooldowns, damage values, targeting behavior, post-normalization player mechanics, and match victory/loss conditions are **unresolved / not yet specified** and are flagged in Appendix C.
 
 #### Branch 2 — Cosmic Boss
-**Trigger condition:** At least 1 Survivor holds out past the **60-second threshold** and triggers the beacon.
-
-| Property | Detail |
-|---|---|
-| Faction | Alien entity invades the Quarantine Lab facility — fights all players (both Survivors and Infected) |
-| Win condition | Survivors defeat the Cosmic Boss |
+**Trigger condition:** All active players become infected **before** the 60-second survival condition is reached.
+- Spawns the **Cosmic Boss**.
+- Mutually exclusive with the Infected Boss branch.
 
 > [!NOTE]
-> Exact Cosmic Boss ability names, damage values, and health values are **not yet specified** in approved documents. These must be defined and approved before Milestone 5 implementation.
+> Exact Cosmic Boss health, ability names, cooldowns, damage values, targeting behavior, player state/faction rules upon spawn, and match victory/loss conditions are **unresolved / not yet specified** and are flagged in Appendix C.
 
 ### 4.5 Infection Mode Weapons (Three Dedicated Weapons)
 Weapon availability, ammo, and spawn points are specific to the Quarantine Lab map.
@@ -319,7 +312,7 @@ These two maps are completely independent. Terrain, hazards, spawn points, and b
 | Fireball Gun ammo | 100 rounds | Granted to all surviving players at 200 pts |
 | Fireball Gun damage | 50 HP per shot | Direct hit damage against Demon Boss |
 | Infection grace period | 10 seconds | No infection spreading |
-| Infection 60-second rule | 60 seconds | Survivor threshold for Cosmic Boss branch |
+| Infection 60-second rule | 60 seconds | At least 1 normal player survives continuously -> Spawn Infected Boss & normalize all players |
 | Cryo Freeze-Ray slow | 50% movement speed | Stacking |
 | Sniper charge time | 1.2 seconds | Before projectile fires |
 | Max room players | 8 | Server-enforced |
@@ -327,19 +320,24 @@ These two maps are completely independent. Terrain, hazards, spawn points, and b
 
 ---
 
-## Appendix C — Values Requiring Approval Before Implementation
+## Appendix C — Values and Unresolved Mechanics Requiring Approval Before Implementation
 
-The following mechanics have been named but their exact numeric values have **not** been approved. These must be specified and signed off before the respective milestone begins coding.
+The following mechanics, numerical values, and design questions have **not** been approved or finalized. These must be specified and explicitly signed off before Milestone 6 coding begins.
 
-| Item | Needed For |
-|---|---|
-| Smoke bomb AoE radius and arena spawn positions | Milestone 5 |
-| Toxic gas cloud radius and spawn pattern | Milestone 5 |
-| Laser wall width, speed, and sweep axis | Milestone 5 |
-| Fireball Gun fire rate / shot cooldown and projectile speed | Milestone 5 |
-| Scatter Shotgun: pellet count, spread, range, damage, knockback, ammo | Milestone 6 |
-| Plasma SMG: fire rate, damage, heat capacity, overheat duration, ammo | Milestone 6 |
-| Cryo Freeze-Ray: range, slow duration, energy drain, damage (if any) | Milestone 6 |
-| Infected Boss: health, abilities, damage values | Milestone 6 |
-| Cosmic Boss: health, abilities, damage values | Milestone 6 |
-| Infection weapon spawn positions on Quarantine Lab map | Milestone 6 |
+### C.1 Missing Numerical Values (Infection Mode & Weapons)
+| Item | Needed For | Status |
+|---|---|---|
+| Infected Boss: health (HP), movement speed, ability cooldowns, damage values, hitboxes | Milestone 6 | Unspecified |
+| Cosmic Boss: health (HP), movement speed, ability cooldowns, damage values, hitboxes | Milestone 6 | Unspecified |
+| Scatter Shotgun: pellet count, spread angle, effective range, damage per pellet, knockback force, ammo count | Milestone 6 | Unspecified |
+| Plasma SMG: fire rate, projectile speed, damage per shot, heat capacity, overheat cooldown, ammo count | Milestone 6 | Unspecified |
+| Cryo Freeze-Ray: beam range, slow duration, slow falloff, energy/ammo drain rate, damage (if any) | Milestone 6 | Unspecified |
+| Quarantine Lab map dimensions, boundaries, obstacle collision boxes, and weapon spawn positions | Milestone 6 | Unspecified |
+
+### C.2 Unresolved Design Contradictions & Gameplay Rules
+| Topic | Unresolved Issue / Question | Status |
+|---|---|---|
+| **Infected Boss Victory Conditions** | When Infected Boss spawns after 60s survival and players are normalized, what is the team objective and win/loss condition? (e.g., Do all normalized players cooperate to defeat the Infected Boss? Does the round end if all players die?) | Awaiting User Approval |
+| **Cosmic Boss Victory Conditions** | When Cosmic Boss spawns after all active players become infected before 60s, what is the win/loss condition? (e.g., Do infected players fight the Cosmic Boss together, or does infected status persist with a different objective?) | Awaiting User Approval |
+| **Post-Normalization Player Mechanics** | When all players normalize upon Infected Boss spawn, what are their baseline stats, weapons, and abilities? | Awaiting User Approval |
+| **Boss Targeting Rules** | How do the Infected Boss and Cosmic Boss prioritize targets among active players? | Awaiting User Approval |
