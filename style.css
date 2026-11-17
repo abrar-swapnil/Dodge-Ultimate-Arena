@@ -2111,3 +2111,300 @@ html, body {
   color: #042f2e;
   transform: translateY(-1px);
 }
+
+
+/* ══════════════════════════════════════════════════════════════════
+   MULTIPLAYER LOBBY OVERLAY — Milestone 2
+   ══════════════════════════════════════════════════════════════════ */
+
+.lobby-modal {
+  background: linear-gradient(160deg, #0d2233 0%, #0a1a2e 60%, #061220 100%);
+  border: 1.5px solid rgba(94, 234, 212, 0.35);
+  border-radius: 18px;
+  box-shadow: 0 0 60px rgba(94, 234, 212, 0.12), 0 24px 60px rgba(0,0,0,0.6);
+  width: min(640px, 95vw);
+  max-height: 90vh;
+  overflow-y: auto;
+  padding: 24px 24px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  animation: modalSlideIn 0.25s ease;
+}
+
+/* ── Header ── */
+.lobby-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+  border-bottom: 1px solid rgba(94,234,212,0.18);
+  padding-bottom: 14px;
+}
+
+.lobby-title-block {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.lobby-icon { font-size: 1.5rem; }
+
+.lobby-title {
+  font-size: 1.15rem;
+  font-weight: 800;
+  letter-spacing: 2px;
+  color: #5eead4;
+  text-transform: uppercase;
+}
+
+.lobby-room-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(94,234,212,0.08);
+  border: 1px solid rgba(94,234,212,0.25);
+  border-radius: 8px;
+  padding: 6px 12px;
+}
+
+.lobby-room-label {
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 1px;
+  color: #64748b;
+  text-transform: uppercase;
+}
+
+.lobby-code-badge {
+  font-size: 1.1rem;
+  font-weight: 900;
+  letter-spacing: 4px;
+  color: #f0fdf4;
+  font-family: 'Courier New', monospace;
+}
+
+.lobby-copy-btn {
+  padding: 4px 8px !important;
+  font-size: 0.8rem !important;
+  min-height: unset !important;
+}
+
+/* ── Mode Selector ── */
+.lobby-mode-row,
+.lobby-mode-display {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.lobby-mode-pills {
+  display: flex;
+  gap: 8px;
+}
+
+.lobby-mode-pill {
+  background: rgba(255,255,255,0.05);
+  border: 1.5px solid rgba(255,255,255,0.15);
+  border-radius: 20px;
+  color: #94a3b8;
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 1px;
+  padding: 6px 16px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.lobby-mode-pill.active {
+  background: rgba(94,234,212,0.18);
+  border-color: #5eead4;
+  color: #5eead4;
+  box-shadow: 0 0 12px rgba(94,234,212,0.2);
+}
+
+.lobby-mode-pill:hover:not(.active) {
+  border-color: rgba(94,234,212,0.4);
+  color: #cbd5e1;
+}
+
+.lobby-mode-text-value {
+  font-weight: 800;
+  color: #5eead4;
+  letter-spacing: 2px;
+  font-size: 0.9rem;
+}
+
+/* ── Section Label ── */
+.lobby-section-label {
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 1.5px;
+  color: #64748b;
+  text-transform: uppercase;
+}
+
+/* ── Player Grid ── */
+#lobby-player-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 10px;
+}
+
+@media (max-width: 520px) {
+  #lobby-player-grid { grid-template-columns: repeat(2, 1fr); }
+}
+
+.lobby-player-card {
+  background: rgba(255,255,255,0.03);
+  border: 1.5px solid rgba(255,255,255,0.1);
+  border-radius: 12px;
+  padding: 12px 8px 10px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  position: relative;
+  transition: border-color 0.2s ease, background 0.2s ease;
+  min-height: 100px;
+}
+
+.lobby-player-card.occupied {
+  border-color: rgba(94,234,212,0.3);
+  background: rgba(94,234,212,0.05);
+}
+
+.lobby-player-card.ready {
+  border-color: #22c55e;
+  background: rgba(34,197,94,0.07);
+  box-shadow: 0 0 10px rgba(34,197,94,0.15);
+}
+
+.lobby-player-card.empty-slot {
+  border-style: dashed;
+  opacity: 0.45;
+}
+
+/* Avatar circle */
+.lobby-avatar {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background: rgba(255,255,255,0.08);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.3rem;
+  overflow: hidden;
+  border: 2px solid rgba(255,255,255,0.12);
+  flex-shrink: 0;
+}
+
+.lobby-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: 50%;
+}
+
+/* Player name */
+.lobby-player-name {
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: #e2e8f0;
+  text-align: center;
+  max-width: 90%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lobby-player-name.empty-label {
+  color: #334155;
+  font-style: italic;
+  font-weight: 500;
+}
+
+/* Host crown */
+.lobby-host-crown {
+  position: absolute;
+  top: -10px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 1rem;
+  line-height: 1;
+  filter: drop-shadow(0 0 4px rgba(250,204,21,0.6));
+}
+
+/* Ready badge */
+.lobby-ready-badge {
+  font-size: 0.65rem;
+  font-weight: 800;
+  letter-spacing: 1px;
+  padding: 2px 7px;
+  border-radius: 10px;
+  text-transform: uppercase;
+}
+
+.lobby-ready-badge.ready {
+  background: rgba(34,197,94,0.25);
+  color: #4ade80;
+  border: 1px solid rgba(34,197,94,0.4);
+}
+
+.lobby-ready-badge.not-ready {
+  background: rgba(249,115,22,0.15);
+  color: #fb923c;
+  border: 1px solid rgba(249,115,22,0.3);
+}
+
+/* ── Status Message ── */
+.lobby-status-msg {
+  font-size: 0.8rem;
+  font-weight: 600;
+  text-align: center;
+  min-height: 1.2em;
+  color: #94a3b8;
+  letter-spacing: 0.5px;
+}
+
+.lobby-status-msg.error  { color: #f87171; }
+.lobby-status-msg.success{ color: #4ade80; }
+.lobby-status-msg.info   { color: #5eead4; }
+
+/* ── Bottom Actions ── */
+.lobby-actions {
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  border-top: 1px solid rgba(94,234,212,0.12);
+  padding-top: 14px;
+}
+
+.lobby-leave-btn { margin-right: auto; }
+
+/* Start button pulsing when enabled */
+.lobby-start-btn:not([disabled]) {
+  animation: softPulse 1.8s ease-in-out infinite;
+}
+
+@keyframes softPulse {
+  0%, 100% { box-shadow: 0 0 8px rgba(94,234,212,0.3); }
+  50%       { box-shadow: 0 0 22px rgba(94,234,212,0.6); }
+}
+
+/* Connecting spinner inside status */
+.lobby-spinner {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border: 2px solid rgba(94,234,212,0.3);
+  border-top-color: #5eead4;
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+  vertical-align: middle;
+  margin-right: 6px;
+}

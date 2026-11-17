@@ -30,6 +30,130 @@ const gamerProfiles = {};
 // Private in-memory Feedbacks store for developer (Abrar Swapnil)
 const feedbackStore = [];
 
+// ══ MULTIPLAYER ROOM REGISTRY ════════════════════════════════════
+// roomCode -> { hostPeerId, players: Map<peerId, {name,photo,shape,isReady,isHost}>, mode, status, createdAt }
+const activeRooms = new Map();
+const MAX_ROOM_PLAYERS = 8;
+
+function generateRoomCode() {
+  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+  let code = "";
+  for (let i = 0; i < 6; i++) code += chars[Math.floor(Math.random() * chars.length)];
+  return code;
+}
+
+function cleanupStaleRooms() {
+  const ONE_HOUR = 3600000;
+  const now = Date.now();
+  for (const [code, room] of activeRooms) {
+    if (now - room.createdAt > ONE_HOUR) activeRooms.delete(code);
+  }
+}
+
+// POST /api/rooms/create
+app.post("/api/rooms/create", (req, res) => {
+  cleanupStaleRooms();
+  const { peerId, name, shape, photo } = req.body;
+  if (!peerId || !name) return res.status(400).json({ success: false, error: "peerId and name are required." });
+
+  let roomCode;
+  let attempts = 0;
+  do { roomCode = generateRoomCode(); attempts++; } while (activeRooms.has(roomCode) && attempts < 20);
+
+  const players = new Map();
+  players.set(peerId, { name: name.slice(0, 25), shape: shape || "square", photo: photo || null, isReady: false, isHost: true });
+
+  activeRooms.set(roomCode, {
+    hostPeerId: peerId,
+    players,
+    mode: "ELITE",
+    status: "LOBBY",
+    createdAt: Date.now(),
+  });
+
+  console.log(`[ROOM] Created ${roomCode} by ${name} (${peerId}). Total rooms: ${activeRooms.size}`);
+  return res.json({ success: true, roomCode, playerCount: 1, maxPlayers: MAX_ROOM_PLAYERS });
+});
+
+// POST /api/rooms/join
+app.post("/api/rooms/join", (req, res) => {
+  const { roomCode, peerId, name, shape, photo } = req.body;
+  if (!roomCode || !peerId || !name) return res.status(400).json({ success: false, error: "roomCode, peerId and name are required." });
+
+  const code = roomCode.toUpperCase();
+  const room = activeRooms.get(code);
+  if (!room) return res.status(404).json({ success: false, error: "Room not found." });
+  if (room.status !== "LOBBY") return res.status(403).json({ success: false, error: "Match already in progress." });
+  if (room.players.size >= MAX_ROOM_PLAYERS) return res.status(403).json({ success: false, error: "Room is full (max 8 players)." });
+
+  room.players.set(peerId, { name: name.slice(0, 25), shape: shape || "square", photo: photo || null, isReady: false, isHost: false });
+
+  const playerList = Array.from(room.players.entries()).map(([id, p]) => ({ peerId: id, ...p }));
+  console.log(`[ROOM] ${name} (${peerId}) joined ${code}. Players: ${room.players.size}/${MAX_ROOM_PLAYERS}`);
+  return res.json({ success: true, roomCode: code, hostPeerId: room.hostPeerId, mode: room.mode, players: playerList, maxPlayers: MAX_ROOM_PLAYERS });
+});
+
+// POST /api/rooms/leave
+app.post("/api/rooms/leave", (req, res) => {
+  const { roomCode, peerId } = req.body;
+  if (!roomCode || !peerId) return res.status(400).json({ success: false, error: "roomCode and peerId are required." });
+
+  const code = roomCode.toUpperCase();
+  const room = activeRooms.get(code);
+  if (!room) return res.json({ success: true, message: "Room not found (already cleaned up)." });
+
+  room.players.delete(peerId);
+  if (room.players.size === 0 || room.hostPeerId === peerId) {
+    activeRooms.delete(code);
+    console.log(`[ROOM] ${code} destroyed (host left or empty).`);
+    return res.json({ success: true, roomDestroyed: true });
+  }
+  console.log(`[ROOM] ${peerId} left ${code}. Remaining: ${room.players.size}`);
+  return res.json({ success: true, playerCount: room.players.size });
+});
+
+// GET /api/rooms/:code — public room info (no PINs)
+app.get("/api/rooms/:code", (req, res) => {
+  const code = req.params.code.toUpperCase();
+  const room = activeRooms.get(code);
+  if (!room) return res.status(404).json({ success: false, error: "Room not found." });
+  const playerList = Array.from(room.players.entries()).map(([id, p]) => ({
+    peerId: id, name: p.name, shape: p.shape, isReady: p.isReady, isHost: p.isHost
+  }));
+  return res.json({ success: true, roomCode: code, hostPeerId: room.hostPeerId, mode: room.mode, status: room.status, playerCount: room.players.size, maxPlayers: MAX_ROOM_PLAYERS, players: playerList });
+});
+
+// POST /api/rooms/ready — toggle ready state
+app.post("/api/rooms/ready", (req, res) => {
+  const { roomCode, peerId, isReady } = req.body;
+  if (!roomCode || !peerId) return res.status(400).json({ success: false, error: "roomCode and peerId are required." });
+  const code = roomCode.toUpperCase();
+  const room = activeRooms.get(code);
+  if (!room) return res.status(404).json({ success: false, error: "Room not found." });
+  const player = room.players.get(peerId);
+  if (!player) return res.status(403).json({ success: false, error: "Player not in this room." });
+  player.isReady = !!isReady;
+  return res.json({ success: true });
+});
+
+// POST /api/rooms/start — host starts match, validates room status
+app.post("/api/rooms/start", (req, res) => {
+  const { roomCode, peerId, mode } = req.body;
+  if (!roomCode || !peerId) return res.status(400).json({ success: false, error: "roomCode and peerId are required." });
+  const code = roomCode.toUpperCase();
+  const room = activeRooms.get(code);
+  if (!room) return res.status(404).json({ success: false, error: "Room not found." });
+  if (room.hostPeerId !== peerId) return res.status(403).json({ success: false, error: "Only the host can start the match." });
+  if (room.players.size < 2) return res.status(400).json({ success: false, error: "Need at least 2 players to start." });
+  const nonHostPlayers = Array.from(room.players.values()).filter(p => !p.isHost);
+  const allReady = nonHostPlayers.every(p => p.isReady);
+  if (!allReady) return res.status(400).json({ success: false, error: "Not all players are ready." });
+  if (mode === "ELITE" || mode === "INFECTION") room.mode = mode;
+  room.status = "IN_PROGRESS";
+  console.log(`[ROOM] ${code} match STARTED in ${room.mode} mode. Players: ${room.players.size}`);
+  return res.json({ success: true, mode: room.mode });
+});
+
 // Disk persistence for profiles
 const DATA_DIR = path.join(__dirname, "data");
 const DATA_FILE = path.join(DATA_DIR, "gamer_profiles.json");
@@ -519,7 +643,21 @@ peerServer.on("connection", (client) => {
 });
 
 peerServer.on("disconnect", (client) => {
-  console.log(`[-] Peer disconnected: ${client.getId()}`);
+  const peerId = client.getId();
+  console.log(`[-] Peer disconnected: ${peerId}`);
+  // Auto-cleanup: remove peer from any room it was in
+  for (const [code, room] of activeRooms) {
+    if (room.players.has(peerId)) {
+      room.players.delete(peerId);
+      if (room.players.size === 0 || room.hostPeerId === peerId) {
+        activeRooms.delete(code);
+        console.log(`[ROOM] ${code} destroyed (host/last player disconnected: ${peerId})`);
+      } else {
+        console.log(`[ROOM] ${peerId} removed from ${code}. Remaining: ${room.players.size}`);
+      }
+      break;
+    }
+  }
 });
 
 server.listen(PORT, () => {

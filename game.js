@@ -1664,6 +1664,13 @@
       this.isHost = false;
       this.myRole = "p1";
 
+      // Multiplayer Lobby State (Milestone 2)
+      this.lobbyRoomCode = null;        // 6-char code this client belongs to
+      this.lobbyPlayers = new Map();    // peerId -> { name, shape, photo, isReady, isHost }
+      this.lobbyMode = "ELITE";         // selected game mode
+      this.mpConnections = new Map();   // peerId -> { reliable, unreliable }
+      this.lobbyIsReady = false;        // this client's ready state
+
       this.gamerProfile = null; // null = guest, object = logged-in profile
       this.setupDOM();
       this.setupKeyboard();
@@ -1975,17 +1982,18 @@
       });
       document.getElementById("btn-mode-online")?.addEventListener("click", () => {
         this.sounds._init();
+        // Show new lobby sub-panel (create/join choice) or directly open lobby
         document.getElementById("online-panel")?.classList.remove("hidden");
       });
       document.getElementById("online-back-btn")?.addEventListener("click", () => {
         document.getElementById("online-panel")?.classList.add("hidden");
       });
 
-      // Host / Join
-      document.getElementById("btn-create-room")?.addEventListener("click", () => this.hostCustomRoom());
+      // Host / Join — wired to new 8-player lobby system
+      document.getElementById("btn-create-room")?.addEventListener("click", () => this.lobbyCreate());
       document.getElementById("btn-join-room")?.addEventListener("click", () => {
         const input = document.getElementById("join-room-input");
-        if (input && input.value.trim()) this.joinCustomRoom(input.value.trim().toUpperCase());
+        if (input && input.value.trim()) this.lobbyJoin(input.value.trim().toUpperCase());
       });
       document.getElementById("btn-copy-link")?.addEventListener("click", () => {
         const code = document.getElementById("created-room-code")?.innerText;
@@ -1999,14 +2007,14 @@
         }
       });
 
-      // Auto-join from URL param
+      // Auto-join from URL param — route to new lobby
       const urlParams = new URLSearchParams(window.location.search);
       const roomParam = urlParams.get("room");
       if (roomParam) {
         document.getElementById("online-panel")?.classList.remove("hidden");
         const joinInput = document.getElementById("join-room-input");
         if (joinInput) joinInput.value = roomParam.toUpperCase();
-        setTimeout(() => this.joinCustomRoom(roomParam.toUpperCase()), 500);
+        setTimeout(() => this.lobbyJoin(roomParam.toUpperCase()), 500);
       }
     }
 
@@ -3885,8 +3893,537 @@
       this.updateHUD();
     }
 
-    broadcastState() {
-      if (this.mode !== "CUSTOM_ROOM" || !this.isHost || !this.conn || !this.conn.open) return;
+    // ══════════════════════════════════════════════════════════════
+    // MULTIPLAYER LOBBY — Milestone 2
+    // All lobby logic is isolated here. Solo Mode is never touched.
+    // ══════════════════════════════════════════════════════════════
+
+    // Helpers
+    _serverBase() {
+      return window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1"
+        ? "http://localhost:9000"
+        : "https://dodge-ultimate-arena.onrender.com";
+    }
+
+    _myPlayerData() {
+      const p = this.gamerProfile;
+      return {
+        name: p ? p.username : ("Player_" + Math.floor(Math.random() * 9999)),
+        shape: p ? (p.shape || "square") : "square",
+        photo: p ? (p.photo || null) : null,
+      };
+    }
+
+    _setLobbyStatus(msg, type = "info") {
+      const el = document.getElementById("lobby-status-msg");
+      if (!el) return;
+      el.textContent = msg;
+      el.className = `lobby-status-msg ${type}`;
+    }
+
+    // Open the lobby overlay and render it
+    _showLobbyOverlay(asHost) {
+      // Hide main menu
+      document.getElementById("modal-overlay")?.classList.add("hidden");
+      document.getElementById("online-panel")?.classList.add("hidden");
+      // Show lobby
+      const overlay = document.getElementById("lobby-overlay");
+      if (overlay) overlay.classList.remove("hidden");
+
+      // Wire mode pills (host only)
+      const modeRow = document.getElementById("lobby-mode-row");
+      const modeDisplay = document.getElementById("lobby-mode-display");
+      if (asHost) {
+        modeRow?.classList.remove("hidden");
+        modeDisplay?.classList.add("hidden");
+        document.querySelectorAll(".lobby-mode-pill").forEach(pill => {
+          pill.onclick = () => {
+            document.querySelectorAll(".lobby-mode-pill").forEach(p => p.classList.remove("active"));
+            pill.classList.add("active");
+            this.lobbyMode = pill.dataset.mode;
+            this._broadcastLobbyState();
+          };
+        });
+      } else {
+        modeRow?.classList.add("hidden");
+        modeDisplay?.classList.remove("hidden");
+      }
+
+      // Show/hide host vs guest controls
+      const startBtn = document.getElementById("btn-lobby-start");
+      const readyBtn = document.getElementById("btn-lobby-ready");
+      const hostReadyBtn = document.getElementById("btn-lobby-toggle-ready");
+
+      if (asHost) {
+        startBtn?.classList.remove("hidden");
+        hostReadyBtn?.classList.add("hidden");
+        readyBtn?.classList.add("hidden");
+        if (startBtn) {
+          startBtn.disabled = true;
+          startBtn.onclick = () => this._lobbyStartMatch();
+        }
+      } else {
+        startBtn?.classList.add("hidden");
+        hostReadyBtn?.classList.add("hidden");
+        readyBtn?.classList.remove("hidden");
+        if (readyBtn) {
+          readyBtn.onclick = () => this._lobbyToggleReady();
+        }
+      }
+
+      // Room code display
+      const codeEl = document.getElementById("lobby-room-code");
+      if (codeEl) codeEl.textContent = this.lobbyRoomCode || "------";
+
+      // Copy invite link
+      document.getElementById("btn-lobby-copy-code")?.addEventListener("click", () => {
+        const url = `${window.location.origin}${window.location.pathname}?room=${this.lobbyRoomCode}`;
+        navigator.clipboard.writeText(url).then(() => {
+          this._setLobbyStatus("✅ Invite link copied!", "success");
+          setTimeout(() => this._setLobbyStatus(""), 2500);
+        }).catch(() => {});
+      });
+
+      // Leave button
+      document.getElementById("btn-lobby-leave")?.addEventListener("click", () => this._lobbyLeave());
+
+      this._renderLobbyGrid();
+    }
+
+    // Render the 8-slot player grid
+    _renderLobbyGrid() {
+      const grid = document.getElementById("lobby-player-grid");
+      if (!grid) return;
+      grid.innerHTML = "";
+
+      const players = Array.from(this.lobbyPlayers.values());
+
+      for (let i = 0; i < 8; i++) {
+        const card = document.createElement("div");
+        const player = players[i];
+        if (player) {
+          card.className = "lobby-player-card occupied" + (player.isReady ? " ready" : "");
+
+          if (player.isHost) {
+            const crown = document.createElement("span");
+            crown.className = "lobby-host-crown";
+            crown.textContent = "👑";
+            card.appendChild(crown);
+          }
+
+          // Avatar
+          const avatar = document.createElement("div");
+          avatar.className = "lobby-avatar";
+          if (player.photo) {
+            const img = document.createElement("img");
+            img.src = player.photo;
+            avatar.appendChild(img);
+          } else {
+            avatar.textContent = this._shapeEmoji(player.shape || "square");
+          }
+          card.appendChild(avatar);
+
+          // Name
+          const name = document.createElement("div");
+          name.className = "lobby-player-name";
+          name.textContent = player.name;
+          card.appendChild(name);
+
+          // Ready badge
+          const badge = document.createElement("span");
+          badge.className = "lobby-ready-badge " + (player.isReady || player.isHost ? "ready" : "not-ready");
+          badge.textContent = player.isHost ? "HOST" : (player.isReady ? "READY" : "NOT READY");
+          card.appendChild(badge);
+        } else {
+          card.className = "lobby-player-card empty-slot";
+          const name = document.createElement("div");
+          name.className = "lobby-player-name empty-label";
+          name.textContent = "— empty —";
+          card.appendChild(name);
+        }
+        grid.appendChild(card);
+      }
+
+      // Update count
+      const countEl = document.getElementById("lobby-player-count");
+      if (countEl) countEl.textContent = players.length;
+
+      // Update mode display for guest
+      const modeText = document.getElementById("lobby-mode-text");
+      if (modeText) modeText.textContent = this.lobbyMode;
+
+      // Update start button state (host: all guests ready)
+      const startBtn = document.getElementById("btn-lobby-start");
+      if (startBtn && this.isHost) {
+        const guests = players.filter(p => !p.isHost);
+        const allReady = guests.length > 0 && guests.every(p => p.isReady);
+        startBtn.disabled = !allReady;
+      }
+    }
+
+    _shapeEmoji(shape) {
+      const map = { square: "🟦", circle: "🟣", triangle: "🔺", star: "⭐", diamond: "💎", hexagon: "⬡" };
+      return map[shape] || "🟦";
+    }
+
+    // Broadcast current lobby state to all connected peers (host only)
+    _broadcastLobbyState() {
+      if (!this.isHost) return;
+      const state = {
+        type: "LOBBY_STATE",
+        mode: this.lobbyMode,
+        players: Array.from(this.lobbyPlayers.entries()).map(([id, p]) => ({ peerId: id, ...p })),
+      };
+      for (const [, conn] of this.mpConnections) {
+        if (conn.reliable && conn.reliable.open) conn.reliable.send(state);
+      }
+    }
+
+    // Send this client's ready toggle to host (guest)
+    async _lobbyToggleReady() {
+      this.lobbyIsReady = !this.lobbyIsReady;
+      const btn = document.getElementById("btn-lobby-ready");
+      if (btn) {
+        btn.textContent = this.lobbyIsReady ? "❌ Unready" : "✅ Ready";
+        btn.classList.toggle("active", this.lobbyIsReady);
+      }
+      // Notify host via reliable channel
+      const myPeerId = this.peer?.id;
+      if (!myPeerId) return;
+      try {
+        await fetch(`${this._serverBase()}/api/rooms/ready`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ roomCode: this.lobbyRoomCode, peerId: myPeerId, isReady: this.lobbyIsReady }),
+        });
+      } catch (e) { /* non-critical */ }
+      // Also notify host via WebRTC for instant update
+      for (const [, conn] of this.mpConnections) {
+        if (conn.reliable && conn.reliable.open) {
+          conn.reliable.send({ type: "PLAYER_READY", peerId: myPeerId, isReady: this.lobbyIsReady });
+        }
+      }
+    }
+
+    // Host starts the match
+    async _lobbyStartMatch() {
+      if (!this.isHost) return;
+      const myPeerId = this.peer?.id;
+      try {
+        const res = await fetch(`${this._serverBase()}/api/rooms/start`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ roomCode: this.lobbyRoomCode, peerId: myPeerId, mode: this.lobbyMode }),
+        });
+        const data = await res.json();
+        if (!data.success) {
+          this._setLobbyStatus("⚠️ " + data.error, "error");
+          return;
+        }
+      } catch (e) {
+        this._setLobbyStatus("⚠️ Server error. Using local start.", "error");
+      }
+      // Broadcast START to all peers
+      const startMsg = { type: "LOBBY_START", mode: this.lobbyMode };
+      for (const [, conn] of this.mpConnections) {
+        if (conn.reliable && conn.reliable.open) conn.reliable.send(startMsg);
+      }
+      this._hideLobbyAndStartGame();
+    }
+
+    // Triggered on guest by host START message
+    _hideLobbyAndStartGame() {
+      document.getElementById("lobby-overlay")?.classList.add("hidden");
+      // For now: kick off the legacy CUSTOM_ROOM match flow with existing host/conn references
+      // Full gameplay sync is Milestone 3+. Lobby foundation complete here.
+      this._setLobbyStatus("");
+      this.startMatch("CUSTOM_ROOM");
+    }
+
+    // Leave lobby (both host and guest)
+    async _lobbyLeave() {
+      const myPeerId = this.peer?.id;
+      if (myPeerId && this.lobbyRoomCode) {
+        try {
+          await fetch(`${this._serverBase()}/api/rooms/leave`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ roomCode: this.lobbyRoomCode, peerId: myPeerId }),
+          });
+        } catch (e) {}
+        // Notify all connected peers
+        for (const [, conn] of this.mpConnections) {
+          if (conn.reliable?.open) conn.reliable.send({ type: "PLAYER_LEFT", peerId: myPeerId });
+          conn.reliable?.close();
+          conn.unreliable?.close();
+        }
+        this.mpConnections.clear();
+        this.peer?.destroy();
+        this.peer = null;
+      }
+      this.lobbyRoomCode = null;
+      this.lobbyPlayers.clear();
+      this.lobbyIsReady = false;
+      this.isHost = false;
+      document.getElementById("lobby-overlay")?.classList.add("hidden");
+      this.showMenu();
+    }
+
+    // ── HOST: Create Room ──────────────────────────────────────────
+    async lobbyCreate() {
+      const statusBox = document.getElementById("room-code-display");
+      const createBtn = document.getElementById("btn-create-room");
+      if (createBtn) { createBtn.disabled = true; createBtn.textContent = "⏳ Creating..."; }
+
+      const me = this._myPlayerData();
+      let roomCode, hostPeerId;
+
+      try {
+        // 1. Register room on server
+        this.peer = new Peer(undefined, PEER_SERVER_CONFIG);
+        await new Promise((resolve, reject) => {
+          this.peer.on("open", (id) => { hostPeerId = id; resolve(); });
+          this.peer.on("error", reject);
+          setTimeout(reject, 10000);
+        });
+
+        const res = await fetch(`${this._serverBase()}/api/rooms/create`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ peerId: hostPeerId, name: me.name, shape: me.shape, photo: me.photo }),
+        });
+        const data = await res.json();
+        if (!data.success) throw new Error(data.error);
+        roomCode = data.roomCode;
+      } catch (err) {
+        if (createBtn) { createBtn.disabled = false; createBtn.textContent = "Create Room"; }
+        const statusMsg = document.getElementById("join-status");
+        if (statusMsg) statusMsg.textContent = "Failed to create room: " + (err.message || "Network error");
+        return;
+      }
+
+      this.isHost = true;
+      this.myRole = "p1";
+      this.lobbyRoomCode = roomCode;
+      this.lobbyPlayers.set(hostPeerId, { ...me, isReady: true, isHost: true });
+
+      // Show old room code UI for backwards compat
+      const codeSpan = document.getElementById("created-room-code");
+      if (codeSpan) codeSpan.innerText = roomCode;
+      if (statusBox) statusBox.classList.remove("hidden");
+
+      // 2. Listen for incoming peer connections (up to 7 guests)
+      this.peer.on("connection", (incomingConn) => {
+        const guestPeerId = incomingConn.peer;
+        if (this.lobbyPlayers.size >= 8) {
+          incomingConn.on("open", () => incomingConn.send({ type: "ROOM_FULL" }));
+          return;
+        }
+
+        // Set up dual-channel: reliable (this) + unreliable (guest initiates second)
+        incomingConn.on("open", () => {
+          const existingConn = this.mpConnections.get(guestPeerId) || {};
+          if (incomingConn.label === "sync") {
+            existingConn.unreliable = incomingConn;
+          } else {
+            existingConn.reliable = incomingConn;
+          }
+          this.mpConnections.set(guestPeerId, existingConn);
+
+          // Send current lobby state to new guest
+          incomingConn.send({
+            type: "LOBBY_STATE",
+            mode: this.lobbyMode,
+            players: Array.from(this.lobbyPlayers.entries()).map(([id, p]) => ({ peerId: id, ...p })),
+          });
+        });
+
+        incomingConn.on("data", (msg) => this._handleLobbyMessage(msg, guestPeerId));
+        incomingConn.on("close", () => this._handlePeerDisconnect(guestPeerId));
+        incomingConn.on("error", () => this._handlePeerDisconnect(guestPeerId));
+      });
+
+      // 3. Open lobby overlay
+      this._showLobbyOverlay(true);
+      this._setLobbyStatus(`<span class="lobby-spinner"></span> Waiting for players… Room: ${roomCode}`, "info");
+    }
+
+    // ── GUEST: Join Room ───────────────────────────────────────────
+    async lobbyJoin(roomCode) {
+      const joinBtn = document.getElementById("btn-join-room");
+      const statusDiv = document.getElementById("join-status");
+      if (joinBtn) { joinBtn.disabled = true; }
+      if (statusDiv) statusDiv.textContent = "Connecting…";
+
+      const me = this._myPlayerData();
+
+      try {
+        // 1. Validate room on server
+        const checkRes = await fetch(`${this._serverBase()}/api/rooms/${roomCode}`);
+        const checkData = await checkRes.json();
+        if (!checkData.success) throw new Error(checkData.error || "Room not found.");
+        if (checkData.status !== "LOBBY") throw new Error("Match already in progress.");
+        if (checkData.playerCount >= 8) throw new Error("Room is full (max 8 players).");
+
+        const hostPeerId = checkData.hostPeerId;
+
+        // 2. Open WebRTC peer and connect to host
+        this.peer = new Peer(undefined, PEER_SERVER_CONFIG);
+        const myPeerId = await new Promise((resolve, reject) => {
+          this.peer.on("open", resolve);
+          this.peer.on("error", reject);
+          setTimeout(reject, 10000);
+        });
+
+        // Reliable channel (critical events)
+        const reliable = this.peer.connect(hostPeerId, { reliable: true, label: "cmd" });
+        // Unreliable channel (movement snapshots — future use)
+        const unreliable = this.peer.connect(hostPeerId, { reliable: false, maxRetransmits: 0, ordered: false, label: "sync" });
+
+        await new Promise((resolve, reject) => {
+          reliable.on("open", resolve);
+          reliable.on("error", reject);
+          setTimeout(reject, 10000);
+        });
+
+        this.mpConnections.set(hostPeerId, { reliable, unreliable });
+
+        // 3. Register join on server
+        const joinRes = await fetch(`${this._serverBase()}/api/rooms/join`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ roomCode, peerId: myPeerId, name: me.name, shape: me.shape, photo: me.photo }),
+        });
+        const joinData = await joinRes.json();
+        if (!joinData.success) throw new Error(joinData.error);
+
+        this.isHost = false;
+        this.myRole = "p2";
+        this.lobbyRoomCode = roomCode;
+
+        // Seed local player list from server response
+        this.lobbyPlayers.clear();
+        (joinData.players || []).forEach(p => {
+          this.lobbyPlayers.set(p.peerId, { name: p.name, shape: p.shape, photo: p.photo, isReady: p.isReady, isHost: p.isHost });
+        });
+
+        // Also set legacy conn for backward-compat with existing game code
+        this.conn = reliable;
+
+        // 4. Listen for host messages
+        reliable.on("data", (msg) => this._handleLobbyMessage(msg, hostPeerId));
+        reliable.on("close", () => this._handlePeerDisconnect(hostPeerId));
+
+        // Announce self to host
+        reliable.send({ type: "PLAYER_JOIN", peerId: myPeerId, ...me });
+
+        this._showLobbyOverlay(false);
+        this._setLobbyStatus("✅ Joined! Waiting for host to start…", "info");
+      } catch (err) {
+        if (joinBtn) joinBtn.disabled = false;
+        if (statusDiv) statusDiv.textContent = "Failed: " + (err.message || "Connection error.");
+      }
+    }
+
+    // ── Handle incoming lobby messages ────────────────────────────
+    _handleLobbyMessage(msg, fromPeerId) {
+      if (!msg || !msg.type) return;
+
+      switch (msg.type) {
+        case "LOBBY_STATE":
+          // Full lobby state sync from host
+          this.lobbyPlayers.clear();
+          (msg.players || []).forEach(p => this.lobbyPlayers.set(p.peerId, { name: p.name, shape: p.shape, photo: p.photo || null, isReady: p.isReady, isHost: p.isHost }));
+          this.lobbyMode = msg.mode || this.lobbyMode;
+          this._renderLobbyGrid();
+          break;
+
+        case "PLAYER_JOIN":
+          // Host receives this from new guest
+          if (this.isHost) {
+            if (this.lobbyPlayers.size >= 8) {
+              const conn = this.mpConnections.get(fromPeerId);
+              if (conn?.reliable?.open) conn.reliable.send({ type: "ROOM_FULL" });
+              return;
+            }
+            this.lobbyPlayers.set(fromPeerId, { name: msg.name, shape: msg.shape || "square", photo: msg.photo || null, isReady: false, isHost: false });
+            this._renderLobbyGrid();
+            this._broadcastLobbyState();
+            this._setLobbyStatus(`👤 ${msg.name} joined! (${this.lobbyPlayers.size}/8)`, "info");
+          }
+          break;
+
+        case "PLAYER_READY":
+          if (this.isHost) {
+            const player = this.lobbyPlayers.get(msg.peerId);
+            if (player) player.isReady = msg.isReady;
+            this._renderLobbyGrid();
+            this._broadcastLobbyState();
+          }
+          break;
+
+        case "PLAYER_LEFT":
+          this.lobbyPlayers.delete(msg.peerId);
+          this._renderLobbyGrid();
+          if (this.isHost) {
+            this._broadcastLobbyState();
+            this._setLobbyStatus(`👋 A player left. (${this.lobbyPlayers.size}/8)`, "info");
+          } else {
+            this._setLobbyStatus("🚪 A player left the lobby.", "info");
+          }
+          break;
+
+        case "ROOM_FULL":
+          this._setLobbyStatus("❌ Room is full!", "error");
+          setTimeout(() => this._lobbyLeave(), 2000);
+          break;
+
+        case "LOBBY_START":
+          this.lobbyMode = msg.mode;
+          this._hideLobbyAndStartGame();
+          break;
+
+        // Legacy connection handling (for backwards compat with 2-player mode)
+        default:
+          if (this.state === "PLAYING") this._handleGameplayMessage(msg);
+          break;
+      }
+    }
+
+    // Handle peer disconnect in lobby
+    _handlePeerDisconnect(peerId) {
+      const player = this.lobbyPlayers.get(peerId);
+      const name = player?.name || "A player";
+      this.lobbyPlayers.delete(peerId);
+      this.mpConnections.delete(peerId);
+
+      if (this.isHost) {
+        this._renderLobbyGrid();
+        this._broadcastLobbyState();
+        this._setLobbyStatus(`⚠️ ${name} disconnected. (${this.lobbyPlayers.size}/8)`, "info");
+        // Post leave to server
+        fetch(`${this._serverBase()}/api/rooms/leave`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ roomCode: this.lobbyRoomCode, peerId }),
+        }).catch(() => {});
+      } else {
+        // Host disconnected
+        this._setLobbyStatus("❌ Host disconnected. Returning to menu.", "error");
+        setTimeout(() => this._lobbyLeave(), 2500);
+      }
+    }
+
+    // Route legacy gameplay WebRTC messages (from setupOnlineConnection)
+    _handleGameplayMessage(msg) {
+      // Delegate to existing handler if connection is still the legacy conn
+      if (this.conn && this.conn.open) {
+        // The existing setupOnlineConnection data handler is already attached
+        // This is a no-op — legacy path handles its own events
+      }
+    }
+
+    broadcastState() {      if (this.mode !== "CUSTOM_ROOM" || !this.isHost || !this.conn || !this.conn.open) return;
       this.conn.send({
         type: "STATE",
         state: this.state,
