@@ -2126,6 +2126,25 @@
         }
       });
 
+      // Clear key state on blur or tab switch so player never gets stuck
+      window.addEventListener("blur", () => {
+        for (const k in keysDown) keysDown[k] = false;
+        this.p1Input.x = 0;
+        this.p1Input.y = 0;
+      });
+      document.addEventListener("visibilitychange", () => {
+        if (document.hidden) {
+          for (const k in keysDown) keysDown[k] = false;
+          this.p1Input.x = 0;
+          this.p1Input.y = 0;
+        }
+      });
+
+      // Prevent right-click context menu so player never gets frozen
+      window.addEventListener("contextmenu", (e) => {
+        if (this.state === "PLAYING") e.preventDefault();
+      });
+
       this.pollKeyboard = () => {
         // WASD & Arrows
         let moveX = (keysDown["KeyD"] || keysDown["ArrowRight"] ? 1 : 0) - (keysDown["KeyA"] || keysDown["ArrowLeft"] ? 1 : 0);
@@ -2199,6 +2218,14 @@
       });
 
       window.addEventListener("mouseup", () => {
+        if (mouseDragging) {
+          mouseDragging = false;
+          resetKnob();
+        }
+      });
+
+      zone.addEventListener("contextmenu", (e) => e.preventDefault());
+      window.addEventListener("blur", () => {
         if (mouseDragging) {
           mouseDragging = false;
           resetKnob();
@@ -2369,12 +2396,24 @@
         gunFireInterval = null;
       };
 
-      // Left mouse button on canvas
+      // Block browser context menu on canvas & prevent right-click freeze
+      this.canvas.addEventListener("contextmenu", (e) => {
+        e.preventDefault();
+      });
+
+      // Left mouse button on canvas / Right click protection
       this.canvas.addEventListener("mousedown", (e) => {
+        if (e.button === 2) {
+          e.preventDefault();
+          return;
+        }
         if (e.button === 0) startGunFire();
       });
       window.addEventListener("mouseup", (e) => {
         if (e.button === 0) stopGunFire();
+      });
+      window.addEventListener("blur", () => {
+        stopGunFire();
       });
 
       // Alt key hold
