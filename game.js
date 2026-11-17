@@ -201,7 +201,7 @@
     },
   };
 
-  // --- Milestone 6A & 6B: Infection Mode Parameters (Configurable Appendix C) ---
+  // --- Milestone 6A, 6B & 6C: Infection Mode Parameters (Configurable Appendix C) ---
   const INFECTION_CONFIG = {
     initialEnemyCount: 6,         // Configurable initial mini enemies (Appendix C)
     initialInfectedRatio: 0.5,    // 50% infected, 50% normal (Appendix C)
@@ -217,7 +217,40 @@
     rayblusterRarity: 0.05,       // Configurable Raybluster rarity drop rate (Appendix C)
     weaponPickupRadius: 18,       // Configurable pickup touch radius (Appendix C)
     projectileSpeed: 650,         // Configurable projectile speed (Appendix C)
-    fireCooldown: 0.25            // Configurable weapon fire cooldown (Appendix C)
+    fireCooldown: 0.25,           // Configurable weapon fire cooldown (Appendix C)
+    // Milestone 6C provisional defaults (Appendix C)
+    branchSurvivalTime: 60.0,     // GDD exact: 60s survival threshold
+    bossHp: 2500,                 // GDD exact: 2500 HP
+    bossSpeed: 75,                // Provisional boss movement speed (Appendix C)
+    bossRadius: 36,               // Provisional boss hitbox radius (Appendix C)
+    slashInterval: 12.0,          // Provisional World Cutting Slash cooldown (Appendix C)
+    slashWarningDuration: 3.0,    // GDD exact: 3s warning telegraph
+    slashDamage: 50,              // GDD exact: 50 direct damage
+    slashSeveranceDuration: 8.0,  // Provisional severance duration (Appendix C)
+    minionSpawnInterval: 10.0,    // GDD exact: every 10s spawns 3 possessed minions
+    minionHp: 80,                 // Provisional minion HP (Appendix C)
+    minionSpeed: 160,             // Provisional minion speed (Appendix C)
+    minionDamage: 25,             // Provisional minion contact damage (Appendix C)
+    jumpInterval: 15.0,           // Provisional jump cooldown (Appendix C)
+    jumpWarningDuration: 3.0,     // GDD exact: 3s warning telegraph
+    jumpImpactRadius: 85,         // Provisional jump impact radius (Appendix C)
+    jumpDamage: 40,               // Provisional jump impact damage (Appendix C)
+    sunInterval: 14.0,            // Provisional Falling Sun cooldown (Appendix C)
+    sunSpeed: 280,                // Provisional Falling Sun speed (Appendix C)
+    sunRadius: 18,                // Provisional Falling Sun radius (Appendix C)
+    craterRadius: 42,             // Provisional crater radius (Appendix C)
+    craterDuration: 12.0,         // Provisional crater duration (Appendix C)
+    blackHoleInterval: 22.0,      // Provisional Black Hole cooldown (Appendix C)
+    blackHoleRadius: 70,          // Provisional Black Hole radius (Appendix C)
+    blackHolePullForce: 130,      // Provisional gravitational pull (Appendix C)
+    blackHoleFreezeDuration: 15.0,// GDD exact: 15s freeze
+    whiteHoleInterval: 28.0,      // Provisional White Hole cooldown (Appendix C)
+    whiteHoleRadius: 75,          // Provisional White Hole radius (Appendix C)
+    whiteHoleRepelForce: 300,     // Provisional repulsion force (Appendix C)
+    whiteHoleFreezeDuration: 15.0,// GDD exact: 15s freeze
+    heartSpawnInterval: 8.0,      // Provisional heart spawn interval (Appendix C)
+    heartHealAmount: 10,          // GDD exact: exactly 10 HP per heart
+    maxHeartsInArena: 4           // Provisional max hearts (Appendix C)
   };
 
   // --- Approved Infection Mode Weapon Definitions (GDD Section 5.2) ---
@@ -4644,13 +4677,32 @@
           }
           break;
 
-        // Milestone 5C: Team victory when Demon Boss defeated
+        // Milestone 5C & 6C: Team victory when Boss defeated
         case "MP_MATCH_VICTORY":
           if (this.mpState) {
             this.mpState.status = "VICTORY";
             this.state = "VICTORY";
             this.sounds?.playVictory?.();
-            this.showAnnouncement("👑 ARENA CONQUERED!", "DEMON BOSS DEFEATED!");
+            const title = msg.title || "👑 ARENA CONQUERED!";
+            const sub = msg.subtitle || "BOSS DEFEATED!";
+            this.showAnnouncement(title, sub);
+          }
+          break;
+
+        // Milestone 6C: Team defeat when all players eliminated
+        case "MP_MATCH_DEFEAT":
+          if (this.mpState) {
+            this.mpState.status = "DEFEAT";
+            this.state = "MATCH_OVER";
+            this.sounds?.playGameOver?.();
+            this.showAnnouncement("💀 TEAM WIPEOUT", "ALL PLAYERS ELIMINATED!");
+          }
+          break;
+
+        // Milestone 6C: Infection boss branch transition (host -> guest)
+        case "MP_INFECTION_BRANCH":
+          if (this.mpState && !this.isHost) {
+            this.handleMPInfectionBranch(msg);
           }
           break;
 
@@ -4755,7 +4807,7 @@
         matchId: matchId,
         status: "PLAYING",
         hostId: hostId,
-        mode: mode || "ELITE",
+        mode: mode || this.lobbyMode || "ELITE",
         players: new Map(),
         enemies: new Map(),
         projectiles: [],
@@ -4796,7 +4848,19 @@
         weaponPickups: [],
         infectionProjectiles: [],
         nextWeaponPickupId: 1,
-        nextInfectionProjId: 1
+        nextInfectionProjId: 1,
+        // --- Milestone 6C: Infection Boss Branch & Abilities fields ---
+        infectionTimer: 0,
+        bossBranch: null,       // "INFECTED_BOSS" or "COSMIC_BOSS" (mutually exclusive)
+        heartTimer: 0,
+        nextHeartId: 1,
+        infectionHazards: {
+          slashes: [],          // World Cutting Slash hazards
+          craters: [],          // Falling Sun crater hazards (instant elimination)
+          blackHoles: [],       // Black Hole hazards (pull & 15s freeze)
+          whiteHoles: [],       // White Hole hazards (repel outside & 15s freeze)
+          jumpTelegraph: null   // Targeted Jump telegraph
+        }
       };
 
       const SPAWN_POINTS = [
@@ -4849,6 +4913,9 @@
           isInfected: false,
           infectionState: "NORMAL",
           infectionWeapon: null,
+          freezeTimer: 0,
+          freezeType: null,
+          damageDealt: 0,
           isDashing: false,
           suppressedTimer: 0,
           input: { x: 0, y: 0, sprint: false },
@@ -4984,7 +5051,19 @@
         })),
         infectionProjectiles: [],
         nextWeaponPickupId: msg.nextWeaponPickupId || 1,
-        nextInfectionProjId: 1
+        nextInfectionProjId: 1,
+        // --- Milestone 6C: Infection Boss Branch & Abilities fields ---
+        infectionTimer: 0,
+        bossBranch: null,
+        heartTimer: 0,
+        nextHeartId: 1,
+        infectionHazards: {
+          slashes: [],
+          craters: [],
+          blackHoles: [],
+          whiteHoles: [],
+          jumpTelegraph: null
+        }
       };
 
       if (Array.isArray(msg.players)) {
@@ -5009,6 +5088,9 @@
             isInfected: !!sp.isInfected,
             infectionState: sp.isInfected ? "INFECTED" : "NORMAL",
             infectionWeapon: null,
+            freezeTimer: 0,
+            freezeType: null,
+            damageDealt: 0,
             input: { x: 0, y: 0, sprint: false },
             lastInputSeq: 0
           });
@@ -5044,6 +5126,9 @@
           facingX: Math.round(p.facingX * 100) / 100,
           facingY: Math.round(p.facingY * 100) / 100,
           isInfected: !!p.isInfected,
+          freezeTimer: Math.round((p.freezeTimer || 0) * 10) / 10,
+          freezeType: p.freezeType || null,
+          damageDealt: p.damageDealt || 0,
           infectionWeapon: p.infectionWeapon ? {
             type: p.infectionWeapon.type,
             ammo: p.infectionWeapon.ammo === Infinity ? -1 : p.infectionWeapon.ammo
@@ -5107,13 +5192,16 @@
             active: true
           } : null
         },
-        // Milestone 5C: Demon Boss & Fireballs sync
+        // Milestone 5C & 6C: Boss & Projectiles sync
         boss: this.mpState.boss ? {
           id: this.mpState.boss.id,
+          type: this.mpState.boss.type,
+          name: this.mpState.boss.name,
           x: Math.round(this.mpState.boss.x * 10) / 10,
           y: Math.round(this.mpState.boss.y * 10) / 10,
           hp: this.mpState.boss.hp,
           maxHp: this.mpState.boss.maxHp,
+          radius: this.mpState.boss.radius || 36,
           isAlive: this.mpState.boss.isAlive
         } : null,
         bossProjectiles: (this.mpState.bossProjectiles || []).map(bp => ({
@@ -5134,7 +5222,7 @@
           x: Math.round(pf.x * 10) / 10,
           y: Math.round(pf.y * 10) / 10
         })),
-        // Milestone 6B: Infection Mode weapon pickups and projectiles sync
+        // Milestone 6B & 6C: Infection Mode weapon pickups, projectiles & hazards sync
         weaponPickups: (this.mpState.weaponPickups || []).map(wpk => ({
           id: wpk.id,
           type: wpk.type,
@@ -5147,7 +5235,46 @@
           x: Math.round(ip.x * 10) / 10,
           y: Math.round(ip.y * 10) / 10,
           color: ip.color
-        }))
+        })),
+        infectionTimer: Math.round((this.mpState.infectionTimer || 0) * 10) / 10,
+        bossBranch: this.mpState.bossBranch || null,
+        infectionHazards: this.mpState.infectionHazards ? {
+          slashes: (this.mpState.infectionHazards.slashes || []).map(s => ({
+            id: s.id,
+            state: s.state,
+            timer: Math.round(s.timer * 10) / 10,
+            x1: Math.round(s.x1),
+            y1: Math.round(s.y1),
+            x2: Math.round(s.x2),
+            y2: Math.round(s.y2),
+            width: s.width
+          })),
+          craters: (this.mpState.infectionHazards.craters || []).map(c => ({
+            id: c.id,
+            x: Math.round(c.x),
+            y: Math.round(c.y),
+            radius: c.radius,
+            duration: Math.round(c.duration * 10) / 10
+          })),
+          blackHoles: (this.mpState.infectionHazards.blackHoles || []).map(b => ({
+            id: b.id,
+            x: Math.round(b.x),
+            y: Math.round(b.y),
+            radius: b.radius
+          })),
+          whiteHoles: (this.mpState.infectionHazards.whiteHoles || []).map(w => ({
+            id: w.id,
+            x: Math.round(w.x),
+            y: Math.round(w.y),
+            radius: w.radius
+          })),
+          jumpTelegraph: this.mpState.infectionHazards.jumpTelegraph ? {
+            x: Math.round(this.mpState.infectionHazards.jumpTelegraph.x),
+            y: Math.round(this.mpState.infectionHazards.jumpTelegraph.y),
+            radius: this.mpState.infectionHazards.jumpTelegraph.radius,
+            timer: Math.round(this.mpState.infectionHazards.jumpTelegraph.timer * 10) / 10
+          } : null
+        } : null
       };
       this._broadcastUnreliable(snapshot);
     }
@@ -5191,6 +5318,13 @@
           p.suppressedTimer = sp.suppressedTimer !== undefined ? sp.suppressedTimer : (p.suppressedTimer || 0);
           p.facingX = sp.facingX !== undefined ? sp.facingX : p.facingX;
           p.facingY = sp.facingY !== undefined ? sp.facingY : p.facingY;
+          if (sp.freezeTimer !== undefined) {
+            p.freezeTimer = sp.freezeTimer;
+            p.freezeType = sp.freezeType || null;
+          }
+          if (sp.damageDealt !== undefined) {
+            p.damageDealt = sp.damageDealt;
+          }
           if (sp.isInfected !== undefined) {
             p.isInfected = !!sp.isInfected;
             p.infectionState = p.isInfected ? "INFECTED" : "NORMAL";
@@ -5323,14 +5457,17 @@
         };
       }
 
-      // Milestone 5C: Sync Demon Boss & fireballs on guest
+      // Milestone 5C & 6C: Sync Boss & fireballs on guest
       if (msg.boss !== undefined) {
         this.mpState.boss = msg.boss ? {
           id: msg.boss.id,
+          type: msg.boss.type,
+          name: msg.boss.name,
           x: msg.boss.x,
           y: msg.boss.y,
           hp: msg.boss.hp,
           maxHp: msg.boss.maxHp,
+          radius: msg.boss.radius || 36,
           isAlive: msg.boss.isAlive
         } : null;
       }
@@ -5361,6 +5498,17 @@
           y: ip.y,
           color: ip.color
         }));
+      }
+
+      // Milestone 6C: Sync infectionTimer, bossBranch, and infection hazards on guest
+      if (msg.infectionTimer !== undefined) {
+        this.mpState.infectionTimer = msg.infectionTimer;
+      }
+      if (msg.bossBranch !== undefined) {
+        this.mpState.bossBranch = msg.bossBranch;
+      }
+      if (msg.infectionHazards) {
+        this.mpState.infectionHazards = msg.infectionHazards;
       }
     }
 
@@ -5442,6 +5590,27 @@
       const myId = this.peer?.id;
       if (target.id === myId) {
         this.showAnnouncement("💀 ELIMINATED", "YOU ARE NOW SPECTATING");
+      }
+
+      // Milestone 6C: Check if all players eliminated in Infection Mode -> Team Defeat
+      if (this.mpState.mode === "INFECTION") {
+        let anyAlive = false;
+        for (const p of this.mpState.players.values()) {
+          if (p.isAlive && !p.isSpectator) {
+            anyAlive = true;
+            break;
+          }
+        }
+        if (!anyAlive) {
+          this.mpState.status = "DEFEAT";
+          this.state = "MATCH_OVER";
+          this._broadcastReliable({
+            type: "MP_MATCH_DEFEAT",
+            reason: "ALL_PLAYERS_ELIMINATED"
+          });
+          this.sounds?.playGameOver?.();
+          this.showAnnouncement("💀 TEAM WIPEOUT", "ALL PLAYERS ELIMINATED!");
+        }
       }
       return true;
     }
@@ -6202,6 +6371,131 @@
       }
     }
 
+    _isPointInSlash(px, py, slash) {
+      if (!slash) return false;
+      const x1 = slash.x1, y1 = slash.y1, x2 = slash.x2, y2 = slash.y2;
+      const dx = x2 - x1;
+      const dy = y2 - y1;
+      const l2 = dx * dx + dy * dy;
+      if (l2 === 0) return Math.hypot(px - x1, py - y1) <= (slash.width / 2);
+      let t = ((px - x1) * dx + (py - y1) * dy) / l2;
+      t = Math.max(0, Math.min(1, t));
+      const projX = x1 + t * dx;
+      const projY = y1 + t * dy;
+      const dist = Math.hypot(px - projX, py - projY);
+      return dist <= (slash.width / 2);
+    }
+
+    mpTriggerBossBranch(branchType) {
+      if (!this.isHost || !this.mpState || this.mpState.mode !== "INFECTION") return;
+      const st = this.mpState;
+      if (st.bossBranch) return; // Mutually exclusive
+
+      st.bossBranch = branchType;
+      st.weaponPickups = []; // Weapon pickups cease when boss arrives
+
+      if (branchType === "INFECTED_BOSS") {
+        // GDD: Normalize all players; all players cooperate against Infected Boss
+        for (const p of st.players.values()) {
+          p.isInfected = false;
+          p.infectionState = "NORMAL";
+        }
+        st.boss = {
+          id: "boss_infected",
+          type: "INFECTED_BOSS",
+          name: "Infected Boss",
+          hp: INFECTION_CONFIG.bossHp || 2500,
+          maxHp: INFECTION_CONFIG.bossHp || 2500,
+          x: SCREEN_WIDTH / 2,
+          y: SCREEN_HEIGHT / 2,
+          radius: INFECTION_CONFIG.bossRadius || 36,
+          speed: INFECTION_CONFIG.bossSpeed || 75,
+          isAlive: true,
+          slashTimer: 3.5,
+          minionTimer: INFECTION_CONFIG.minionSpawnInterval || 10.0,
+          jumpTimer: 8.0,
+          isJumping: false
+        };
+        this.showAnnouncement("☣️ INFECTED BOSS RISES!", "ALL PLAYERS CURED — COOPERATE TO DEFEAT THE BOSS!");
+        this.sounds?.playWarning?.();
+
+        this._broadcastReliable({
+          type: "MP_INFECTION_BRANCH",
+          branch: "INFECTED_BOSS",
+          boss: {
+            id: st.boss.id,
+            type: st.boss.type,
+            name: st.boss.name,
+            hp: st.boss.hp,
+            maxHp: st.boss.maxHp,
+            radius: st.boss.radius,
+            x: st.boss.x,
+            y: st.boss.y,
+            isAlive: true
+          },
+          normalized: true
+        });
+      } else if (branchType === "COSMIC_BOSS") {
+        st.boss = {
+          id: "boss_cosmic",
+          type: "COSMIC_BOSS",
+          name: "Cosmic Boss",
+          hp: INFECTION_CONFIG.bossHp || 2500,
+          maxHp: INFECTION_CONFIG.bossHp || 2500,
+          x: SCREEN_WIDTH / 2,
+          y: SCREEN_HEIGHT / 2,
+          radius: INFECTION_CONFIG.bossRadius || 36,
+          speed: INFECTION_CONFIG.bossSpeed || 75,
+          isAlive: true,
+          sunTimer: 4.0,
+          blackHoleTimer: 7.0,
+          whiteHoleTimer: 16.0
+        };
+        this.showAnnouncement("🌌 COSMIC BOSS DESCENDS!", "ANOMALY ENGAGED — COOPERATE TO DEFEAT THE COSMOS!");
+        this.sounds?.playWarning?.();
+
+        this._broadcastReliable({
+          type: "MP_INFECTION_BRANCH",
+          branch: "COSMIC_BOSS",
+          boss: {
+            id: st.boss.id,
+            type: st.boss.type,
+            name: st.boss.name,
+            hp: st.boss.hp,
+            maxHp: st.boss.maxHp,
+            radius: st.boss.radius,
+            x: st.boss.x,
+            y: st.boss.y,
+            isAlive: true
+          },
+          normalized: false
+        });
+      }
+      this.updateHUD();
+    }
+
+    handleMPInfectionBranch(msg) {
+      if (!this.mpState || this.mpState.mode !== "INFECTION") return;
+      this.mpState.bossBranch = msg.branch;
+      this.mpState.weaponPickups = [];
+      if (msg.normalized) {
+        for (const p of this.mpState.players.values()) {
+          p.isInfected = false;
+          p.infectionState = "NORMAL";
+        }
+      }
+      if (msg.boss) {
+        this.mpState.boss = msg.boss;
+      }
+      if (msg.branch === "INFECTED_BOSS") {
+        this.showAnnouncement("☣️ INFECTED BOSS RISES!", "ALL PLAYERS CURED — COOPERATE TO DEFEAT THE BOSS!");
+      } else {
+        this.showAnnouncement("🌌 COSMIC BOSS DESCENDS!", "ANOMALY ENGAGED — COOPERATE TO DEFEAT THE COSMOS!");
+      }
+      this.sounds?.playWarning?.();
+      this.updateHUD();
+    }
+
     mpUpdateInfection(dt) {
       if (!this.isHost || !this.mpState || this.mpState.mode !== "INFECTION") return;
       const st = this.mpState;
@@ -6224,83 +6518,103 @@
         else normalEnemies.push(e);
       }
 
-      // Interaction 1: Infected mini enemy touches normal mini enemy -> infect normal mini enemy
-      for (const infE of infectedEnemies) {
-        for (const normE of normalEnemies) {
-          if (normE.isInfected) continue;
-          const ecx1 = infE.x + infE.size / 2;
-          const ecy1 = infE.y + infE.size / 2;
-          const ecx2 = normE.x + normE.size / 2;
-          const ecy2 = normE.y + normE.size / 2;
-          const dist = Math.hypot(ecx1 - ecx2, ecy1 - ecy2);
-          if (dist <= (infE.size / 2 + normE.size / 2)) {
-            this.mpInfectEntity("ENEMY", normE.id, infE.id);
-          }
-        }
-      }
-
-      // Interaction 2: Infected mini enemy touches normal player -> infect normal player
-      for (const infE of infectedEnemies) {
-        for (const normP of normalPlayers) {
-          if (normP.isInfected) continue;
-          const ecx = infE.x + infE.size / 2;
-          const ecy = infE.y + infE.size / 2;
-          const pcx = normP.x + PLAYER_SIZE / 2;
-          const pcy = normP.y + PLAYER_SIZE / 2;
-          const dist = Math.hypot(ecx - pcx, ecy - pcy);
-          if (dist <= (infE.size / 2 + PLAYER_SIZE / 2)) {
-            this.mpInfectEntity("PLAYER", normP.id, infE.id);
-          }
-        }
-      }
-
-      // Interaction 3: Infected player touches normal player -> infect normal player
-      for (const infP of infectedPlayers) {
-        for (const normP of normalPlayers) {
-          if (normP.isInfected) continue;
-          const pcx1 = infP.x + PLAYER_SIZE / 2;
-          const pcy1 = infP.y + PLAYER_SIZE / 2;
-          const pcx2 = normP.x + PLAYER_SIZE / 2;
-          const pcy2 = normP.y + PLAYER_SIZE / 2;
-          const dist = Math.hypot(pcx1 - pcx2, pcy1 - pcy2);
-          if (dist <= PLAYER_SIZE) {
-            this.mpInfectEntity("PLAYER", normP.id, infP.id);
-          }
-        }
-      }
-
-      // Interaction 4: Infected player touches normal mini enemy -> infect normal mini enemy
-      for (const infP of infectedPlayers) {
-        for (const normE of normalEnemies) {
-          if (normE.isInfected) continue;
-          const pcx = infP.x + PLAYER_SIZE / 2;
-          const pcy = infP.y + PLAYER_SIZE / 2;
-          const ecx = normE.x + normE.size / 2;
-          const ecy = normE.y + normE.size / 2;
-          const dist = Math.hypot(pcx - ecx, pcy - ecy);
-          if (dist <= (PLAYER_SIZE / 2 + normE.size / 2)) {
-            this.mpInfectEntity("ENEMY", normE.id, infP.id);
-          }
-        }
-      }
-
-      // --- Milestone 6B: Weapon Pickup Touch Detection (Host Authoritative) ---
-      if (st.weaponPickups && st.weaponPickups.length > 0) {
-        const collectedIds = new Set();
-        for (const p of st.players.values()) {
-          if (!p.isAlive || p.isSpectator || p.infectionWeapon) continue; // 1 weapon per player; no switching
-          const pcx = p.x + PLAYER_SIZE / 2;
-          const pcy = p.y + PLAYER_SIZE / 2;
-
-          for (const pk of st.weaponPickups) {
-            if (collectedIds.has(pk.id)) continue;
-            const dist = Math.hypot(pcx - pk.x, pcy - pk.y);
-            if (dist <= (PLAYER_SIZE / 2 + (pk.radius || INFECTION_CONFIG.weaponPickupRadius || 18))) {
-              collectedIds.add(pk.id);
-              this.mpCollectWeaponPickup(p.id, pk.id);
-              break; // Player collected one weapon, stop checking other pickups for this player
+      // ── Infection Spreading (Interactions 1-4) Active before Boss Branch ──
+      if (!st.bossBranch) {
+        // Interaction 1: Infected mini enemy touches normal mini enemy -> infect normal mini enemy
+        for (const infE of infectedEnemies) {
+          for (const normE of normalEnemies) {
+            if (normE.isInfected) continue;
+            const ecx1 = infE.x + infE.size / 2;
+            const ecy1 = infE.y + infE.size / 2;
+            const ecx2 = normE.x + normE.size / 2;
+            const ecy2 = normE.y + normE.size / 2;
+            const dist = Math.hypot(ecx1 - ecx2, ecy1 - ecy2);
+            if (dist <= (infE.size / 2 + normE.size / 2)) {
+              this.mpInfectEntity("ENEMY", normE.id, infE.id);
             }
           }
+        }
+
+        // Interaction 2: Infected mini enemy touches normal player -> infect normal player
+        for (const infE of infectedEnemies) {
+          for (const normP of normalPlayers) {
+            if (normP.isInfected) continue;
+            const ecx = infE.x + infE.size / 2;
+            const ecy = infE.y + infE.size / 2;
+            const pcx = normP.x + PLAYER_SIZE / 2;
+            const pcy = normP.y + PLAYER_SIZE / 2;
+            const dist = Math.hypot(ecx - pcx, ecy - pcy);
+            if (dist <= (infE.size / 2 + PLAYER_SIZE / 2)) {
+              this.mpInfectEntity("PLAYER", normP.id, infE.id);
+            }
+          }
+        }
+
+        // Interaction 3: Infected player touches normal player -> infect normal player
+        for (const infP of infectedPlayers) {
+          for (const normP of normalPlayers) {
+            if (normP.isInfected) continue;
+            const pcx1 = infP.x + PLAYER_SIZE / 2;
+            const pcy1 = infP.y + PLAYER_SIZE / 2;
+            const pcx2 = normP.x + PLAYER_SIZE / 2;
+            const pcy2 = normP.y + PLAYER_SIZE / 2;
+            const dist = Math.hypot(pcx1 - pcx2, pcy1 - pcy2);
+            if (dist <= PLAYER_SIZE) {
+              this.mpInfectEntity("PLAYER", normP.id, infP.id);
+            }
+          }
+        }
+
+        // Interaction 4: Infected player touches normal mini enemy -> infect normal mini enemy
+        for (const infP of infectedPlayers) {
+          for (const normE of normalEnemies) {
+            if (normE.isInfected) continue;
+            const pcx = infP.x + PLAYER_SIZE / 2;
+            const pcy = infP.y + PLAYER_SIZE / 2;
+            const ecx = normE.x + normE.size / 2;
+            const ecy = normE.y + normE.size / 2;
+            const dist = Math.hypot(pcx - ecx, pcy - ecy);
+            if (dist <= (PLAYER_SIZE / 2 + normE.size / 2)) {
+              this.mpInfectEntity("ENEMY", normE.id, infP.id);
+            }
+          }
+        }
+
+        // --- Milestone 6B: Weapon Pickup Touch Detection (Host Authoritative) ---
+        if (st.weaponPickups && st.weaponPickups.length > 0) {
+          const collectedIds = new Set();
+          for (const p of st.players.values()) {
+            if (!p.isAlive || p.isSpectator || p.infectionWeapon) continue; // 1 weapon per player; no switching
+            const pcx = p.x + PLAYER_SIZE / 2;
+            const pcy = p.y + PLAYER_SIZE / 2;
+
+            for (const pk of st.weaponPickups) {
+              if (collectedIds.has(pk.id)) continue;
+              const dist = Math.hypot(pcx - pk.x, pcy - pk.y);
+              if (dist <= (PLAYER_SIZE / 2 + (pk.radius || INFECTION_CONFIG.weaponPickupRadius || 18))) {
+                collectedIds.add(pk.id);
+                this.mpCollectWeaponPickup(p.id, pk.id);
+                break; // Player collected one weapon, stop checking other pickups for this player
+              }
+            }
+          }
+        }
+
+        // ── Milestone 6C: Check Branch Logic & Transitions (Host Authoritative) ──
+        st.infectionTimer = (st.infectionTimer || 0) + dt;
+        const livingActivePlayers = Array.from(st.players.values()).filter(p => p.isAlive && !p.isSpectator);
+        const aliveNormals = livingActivePlayers.filter(p => !p.isInfected);
+        const aliveInfected = livingActivePlayers.filter(p => p.isInfected);
+
+        // Branch 1: If >=1 normal player survives continuously for 60s -> Infected Boss
+        if (st.infectionTimer >= (INFECTION_CONFIG.branchSurvivalTime || 60.0) && aliveNormals.length > 0) {
+          this.mpTriggerBossBranch("INFECTED_BOSS");
+          return;
+        }
+        // Branch 2: If ALL active players become infected before 60s -> Cosmic Boss
+        else if (st.infectionTimer < (INFECTION_CONFIG.branchSurvivalTime || 60.0) && livingActivePlayers.length > 0 && livingActivePlayers.length === aliveInfected.length) {
+          this.mpTriggerBossBranch("COSMIC_BOSS");
+          return;
         }
       }
 
@@ -6310,13 +6624,374 @@
           p.infectionWeapon.cooldown = Math.max(0, p.infectionWeapon.cooldown - dt);
         }
       }
+
+      // --- Milestone 6C: Projectiles Update & Boss Hitbox Collision ---
       for (let i = (st.infectionProjectiles || []).length - 1; i >= 0; i--) {
         const pr = st.infectionProjectiles[i];
         pr.x += pr.vx * dt;
         pr.y += pr.vy * dt;
         pr.life -= dt;
+
+        // Check collision with Boss
+        if (st.boss && st.boss.isAlive) {
+          const dist = Math.hypot(pr.x - st.boss.x, pr.y - st.boss.y);
+          if (dist <= (pr.radius + (st.boss.radius || 36))) {
+            st.infectionProjectiles.splice(i, 1);
+            this.mpApplyWeaponDamage(st.boss.type, st.boss.id, pr.shooterId, pr.weaponType);
+            continue;
+          }
+        }
+
         if (pr.life <= 0 || pr.x < -20 || pr.x > SCREEN_WIDTH + 20 || pr.y < -20 || pr.y > SCREEN_HEIGHT + 20) {
           st.infectionProjectiles.splice(i, 1);
+        }
+      }
+
+      // ── Milestone 6C: Boss AI, Abilities, and Hazards Simulation (Host Authoritative) ──
+      if (st.boss && st.boss.isAlive) {
+        const alivePlayers = Array.from(st.players.values()).filter(p => p.isAlive && !p.isSpectator);
+        let nearestPlayer = null;
+        let nearestDist = Infinity;
+        for (const p of alivePlayers) {
+          const dist = Math.hypot(p.x + PLAYER_SIZE / 2 - st.boss.x, p.y + PLAYER_SIZE / 2 - st.boss.y);
+          if (dist < nearestDist) {
+            nearestDist = dist;
+            nearestPlayer = p;
+          }
+        }
+
+        // Movement towards nearest player
+        if (nearestPlayer && !st.boss.isJumping) {
+          const dx = (nearestPlayer.x + PLAYER_SIZE / 2) - st.boss.x;
+          const dy = (nearestPlayer.y + PLAYER_SIZE / 2) - st.boss.y;
+          const dist = Math.hypot(dx, dy);
+          if (dist > 15) {
+            st.boss.x += (dx / dist) * (st.boss.speed || 75) * dt;
+            st.boss.y += (dy / dist) * (st.boss.speed || 75) * dt;
+          }
+        }
+        st.boss.x = Math.max(50, Math.min(SCREEN_WIDTH - 50, st.boss.x));
+        st.boss.y = Math.max(50, Math.min(SCREEN_HEIGHT - 50, st.boss.y));
+
+        // ══════════════ INFECTED BOSS ABILITIES ══════════════
+        if (st.boss.type === "INFECTED_BOSS") {
+          // 1. World Cutting Slash
+          for (let sIdx = (st.infectionHazards.slashes || []).length - 1; sIdx >= 0; sIdx--) {
+            const sl = st.infectionHazards.slashes[sIdx];
+            if (sl.state === "WARNING") {
+              sl.timer -= dt;
+              if (sl.timer <= 0) {
+                sl.state = "SEVERED";
+                sl.severanceTimer = INFECTION_CONFIG.slashSeveranceDuration || 8.0;
+                // Direct hit deals 50 damage
+                for (const [pId, p] of st.players) {
+                  if (!p.isAlive || p.isSpectator) continue;
+                  const pcx = p.x + PLAYER_SIZE / 2;
+                  const pcy = p.y + PLAYER_SIZE / 2;
+                  if (this._isPointInSlash(pcx, pcy, sl)) {
+                    this.mpApplyDamage(pId, sl.damage || 50, "world_cutting_slash");
+                  }
+                }
+              }
+            } else if (sl.state === "SEVERED") {
+              sl.severanceTimer -= dt;
+              if (sl.severanceTimer <= 0) {
+                st.infectionHazards.slashes.splice(sIdx, 1);
+                continue;
+              }
+              // Severed zone hazard
+              for (const [pId, p] of st.players) {
+                if (!p.isAlive || p.isSpectator) continue;
+                const pcx = p.x + PLAYER_SIZE / 2;
+                const pcy = p.y + PLAYER_SIZE / 2;
+                if (this._isPointInSlash(pcx, pcy, sl)) {
+                  this.mpApplyDamage(pId, 15 * dt, "severed_void");
+                }
+              }
+            }
+          }
+
+          st.boss.slashTimer = (st.boss.slashTimer || 4.0) - dt;
+          if (st.boss.slashTimer <= 0) {
+            st.boss.slashTimer = INFECTION_CONFIG.slashInterval || 12.0;
+            const targetP = nearestPlayer || { x: SCREEN_WIDTH / 2, y: SCREEN_HEIGHT / 2 };
+            const angle = Math.atan2((targetP.y + PLAYER_SIZE / 2) - st.boss.y, (targetP.x + PLAYER_SIZE / 2) - st.boss.x);
+            const slashLen = 1200;
+            const x1 = st.boss.x - Math.cos(angle) * 400;
+            const y1 = st.boss.y - Math.sin(angle) * 400;
+            const x2 = st.boss.x + Math.cos(angle) * slashLen;
+            const y2 = st.boss.y + Math.sin(angle) * slashLen;
+            if (!st.infectionHazards.slashes) st.infectionHazards.slashes = [];
+            st.infectionHazards.slashes.push({
+              id: "slash_" + Date.now(),
+              state: "WARNING",
+              timer: INFECTION_CONFIG.slashWarningDuration || 3.0,
+              x1, y1, x2, y2,
+              width: 48,
+              damage: INFECTION_CONFIG.slashDamage || 50
+            });
+            this.floatingTexts.push(new FloatingText(st.boss.x, st.boss.y - 20, "⚠️ SLASH TELEGRAPH (3s)!", "#ef4444"));
+          }
+
+          // 2. Possessed Minions: Spawns 3 possessed infected mini enemies every 10s; replaces previous summoned set
+          st.boss.minionTimer = (st.boss.minionTimer || 10.0) - dt;
+          if (st.boss.minionTimer <= 0) {
+            st.boss.minionTimer = INFECTION_CONFIG.minionSpawnInterval || 10.0;
+            // Remove previous summoned set
+            for (const [id, e] of st.enemies) {
+              if (e.isPossessedMinion) st.enemies.delete(id);
+            }
+            // Spawn 3 new possessed infected mini enemies
+            for (let k = 0; k < 3; k++) {
+              const mId = "pos_minion_" + (st.nextEnemyId++);
+              const angle = (k * (Math.PI * 2 / 3));
+              const mx = Math.max(40, Math.min(SCREEN_WIDTH - 40, st.boss.x + Math.cos(angle) * 65));
+              const my = Math.max(40, Math.min(SCREEN_HEIGHT - 40, st.boss.y + Math.sin(angle) * 65));
+              st.enemies.set(mId, {
+                id: mId,
+                type: "MINI",
+                isPossessedMinion: true,
+                isInfected: true,
+                infectionState: "INFECTED",
+                hp: INFECTION_CONFIG.minionHp || 80,
+                maxHp: INFECTION_CONFIG.minionHp || 80,
+                size: 20,
+                speed: INFECTION_CONFIG.minionSpeed || 160,
+                x: mx,
+                y: my,
+                vx: 0,
+                vy: 0,
+                color: "#39ff14"
+              });
+            }
+            this.floatingTexts.push(new FloatingText(st.boss.x, st.boss.y - 20, "☣️ 3 POSSESSED MINIONS SUMMONED!", "#39ff14"));
+          }
+
+          // 3. Targeted Jump: 3-second warning telegraph + AoE landing damage
+          if (st.infectionHazards.jumpTelegraph) {
+            st.infectionHazards.jumpTelegraph.timer -= dt;
+            if (st.infectionHazards.jumpTelegraph.timer <= 0) {
+              st.boss.x = st.infectionHazards.jumpTelegraph.x;
+              st.boss.y = st.infectionHazards.jumpTelegraph.y;
+              st.boss.isJumping = false;
+              const r = INFECTION_CONFIG.jumpImpactRadius || 85;
+              const dmg = INFECTION_CONFIG.jumpDamage || 40;
+              for (const [pId, p] of st.players) {
+                if (!p.isAlive || p.isSpectator) continue;
+                const dist = Math.hypot(p.x + PLAYER_SIZE / 2 - st.boss.x, p.y + PLAYER_SIZE / 2 - st.boss.y);
+                if (dist <= r) {
+                  this.mpApplyDamage(pId, dmg, "infected_boss_jump");
+                }
+              }
+              st.infectionHazards.jumpTelegraph = null;
+              st.boss.jumpTimer = INFECTION_CONFIG.jumpInterval || 15.0;
+            }
+          } else {
+            st.boss.jumpTimer = (st.boss.jumpTimer || 8.0) - dt;
+            if (st.boss.jumpTimer <= 0 && nearestPlayer) {
+              st.boss.isJumping = true;
+              st.infectionHazards.jumpTelegraph = {
+                x: nearestPlayer.x + PLAYER_SIZE / 2,
+                y: nearestPlayer.y + PLAYER_SIZE / 2,
+                radius: INFECTION_CONFIG.jumpImpactRadius || 85,
+                timer: INFECTION_CONFIG.jumpWarningDuration || 3.0
+              };
+              this.floatingTexts.push(new FloatingText(st.boss.x, st.boss.y - 20, "⚠️ TARGETED JUMP (3s)!", "#ffaa00"));
+            }
+          }
+        }
+
+        // ══════════════ COSMIC BOSS ABILITIES ══════════════
+        else if (st.boss.type === "COSMIC_BOSS") {
+          // 1. Falling Sun & Craters (Instant elimination on contact)
+          for (let cIdx = (st.infectionHazards.craters || []).length - 1; cIdx >= 0; cIdx--) {
+            const cr = st.infectionHazards.craters[cIdx];
+            cr.duration -= dt;
+            if (cr.duration <= 0) {
+              st.infectionHazards.craters.splice(cIdx, 1);
+              continue;
+            }
+            for (const [pId, p] of st.players) {
+              if (!p.isAlive || p.isSpectator) continue;
+              const dist = Math.hypot(p.x + PLAYER_SIZE / 2 - cr.x, p.y + PLAYER_SIZE / 2 - cr.y);
+              if (dist <= cr.radius) {
+                this.mpEliminatePlayer(pId, "falling_sun_crater");
+              }
+            }
+          }
+
+          // Process Falling Sun Projectiles
+          for (let pIdx = (st.bossProjectiles || []).length - 1; pIdx >= 0; pIdx--) {
+            const bp = st.bossProjectiles[pIdx];
+            if (bp.type === "FALLING_SUN") {
+              const dx = bp.targetX - bp.x;
+              const dy = bp.targetY - bp.y;
+              const dist = Math.hypot(dx, dy);
+              bp.life -= dt;
+              if (dist <= 15 || bp.life <= 0) {
+                if (!st.infectionHazards.craters) st.infectionHazards.craters = [];
+                st.infectionHazards.craters.push({
+                  id: "crater_" + Date.now() + "_" + Math.random().toString(36).substr(2, 4),
+                  x: bp.targetX,
+                  y: bp.targetY,
+                  radius: INFECTION_CONFIG.craterRadius || 42,
+                  duration: INFECTION_CONFIG.craterDuration || 12.0
+                });
+                st.bossProjectiles.splice(pIdx, 1);
+              } else {
+                bp.x += (dx / dist) * bp.speed * dt;
+                bp.y += (dy / dist) * bp.speed * dt;
+              }
+            }
+          }
+
+          st.boss.sunTimer = (st.boss.sunTimer || 5.0) - dt;
+          if (st.boss.sunTimer <= 0) {
+            st.boss.sunTimer = INFECTION_CONFIG.sunInterval || 14.0;
+            const targetP = nearestPlayer || { x: SCREEN_WIDTH / 2, y: SCREEN_HEIGHT / 2 };
+            if (!st.bossProjectiles) st.bossProjectiles = [];
+            st.bossProjectiles.push({
+              id: "sun_" + (st.nextBossAttackId++),
+              type: "FALLING_SUN",
+              x: st.boss.x,
+              y: st.boss.y,
+              targetX: targetP.x + PLAYER_SIZE / 2,
+              targetY: targetP.y + PLAYER_SIZE / 2,
+              speed: INFECTION_CONFIG.sunSpeed || 280,
+              radius: INFECTION_CONFIG.sunRadius || 18,
+              life: 3.0
+            });
+            this.floatingTexts.push(new FloatingText(st.boss.x, st.boss.y - 20, "☀️ FALLING SUN LAUNCHED!", "#ffaa00"));
+          }
+
+          // 2. Black Hole (Pull + 15s freeze + safe return)
+          for (let bIdx = (st.infectionHazards.blackHoles || []).length - 1; bIdx >= 0; bIdx--) {
+            const bh = st.infectionHazards.blackHoles[bIdx];
+            bh.duration -= dt;
+            if (bh.duration <= 0) {
+              st.infectionHazards.blackHoles.splice(bIdx, 1);
+              continue;
+            }
+            for (const [pId, p] of st.players) {
+              if (!p.isAlive || p.isSpectator || p.freezeTimer > 0) continue;
+              const pcx = p.x + PLAYER_SIZE / 2;
+              const pcy = p.y + PLAYER_SIZE / 2;
+              const dx = bh.x - pcx;
+              const dy = bh.y - pcy;
+              const dist = Math.hypot(dx, dy);
+              if (dist < bh.radius * 2) {
+                const pull = (1 - dist / (bh.radius * 2)) * bh.pullForce;
+                if (dist > 2) {
+                  p.x += (dx / dist) * pull * dt;
+                  p.y += (dy / dist) * pull * dt;
+                }
+              }
+              if (dist < 22) {
+                p.freezeTimer = INFECTION_CONFIG.blackHoleFreezeDuration || 15.0;
+                p.freezeType = "BLACK_HOLE";
+                p.vx = 0;
+                p.vy = 0;
+                this.floatingTexts.push(new FloatingText(p.x, p.y - 15, "🌀 BLACK HOLE FREEZE (15s)!", "#a855f7"));
+              }
+            }
+          }
+
+          st.boss.blackHoleTimer = (st.boss.blackHoleTimer || 8.0) - dt;
+          if (st.boss.blackHoleTimer <= 0) {
+            st.boss.blackHoleTimer = INFECTION_CONFIG.blackHoleInterval || 22.0;
+            const targetP = nearestPlayer || { x: SCREEN_WIDTH / 2, y: SCREEN_HEIGHT / 2 };
+            if (!st.infectionHazards.blackHoles) st.infectionHazards.blackHoles = [];
+            st.infectionHazards.blackHoles.push({
+              id: "bh_" + Date.now(),
+              x: targetP.x + PLAYER_SIZE / 2,
+              y: targetP.y + PLAYER_SIZE / 2,
+              radius: INFECTION_CONFIG.blackHoleRadius || 70,
+              pullForce: INFECTION_CONFIG.blackHolePullForce || 130,
+              duration: 9.0
+            });
+            this.floatingTexts.push(new FloatingText(targetP.x, targetP.y - 20, "🌀 BLACK HOLE OPENED!", "#a855f7"));
+          }
+
+          // 3. White Hole (Repel outside map + 15s freeze + safe return)
+          for (let wIdx = (st.infectionHazards.whiteHoles || []).length - 1; wIdx >= 0; wIdx--) {
+            const wh = st.infectionHazards.whiteHoles[wIdx];
+            wh.duration -= dt;
+            if (wh.duration <= 0) {
+              st.infectionHazards.whiteHoles.splice(wIdx, 1);
+              continue;
+            }
+            for (const [pId, p] of st.players) {
+              if (!p.isAlive || p.isSpectator || p.freezeTimer > 0) continue;
+              const pcx = p.x + PLAYER_SIZE / 2;
+              const pcy = p.y + PLAYER_SIZE / 2;
+              const dx = pcx - wh.x;
+              const dy = pcy - wh.y;
+              const dist = Math.hypot(dx, dy);
+              if (dist < wh.radius * 2) {
+                const dirX = dist > 0 ? (dx / dist) : 1;
+                const dirY = dist > 0 ? (dy / dist) : 0;
+                p.x += dirX * wh.repelForce * dt;
+                p.y += dirY * wh.repelForce * dt;
+                if (p.x < 15 || p.x > SCREEN_WIDTH - PLAYER_SIZE - 15 || p.y < 15 || p.y > SCREEN_HEIGHT - PLAYER_SIZE - 15 || dist < 25) {
+                  p.freezeTimer = INFECTION_CONFIG.whiteHoleFreezeDuration || 15.0;
+                  p.freezeType = "WHITE_HOLE";
+                  p.vx = 0;
+                  p.vy = 0;
+                  this.floatingTexts.push(new FloatingText(p.x, p.y - 15, "⚪ WHITE HOLE FREEZE (15s)!", "#ffffff"));
+                }
+              }
+            }
+          }
+
+          st.boss.whiteHoleTimer = (st.boss.whiteHoleTimer || 18.0) - dt;
+          if (st.boss.whiteHoleTimer <= 0) {
+            st.boss.whiteHoleTimer = INFECTION_CONFIG.whiteHoleInterval || 28.0;
+            if (!st.infectionHazards.whiteHoles) st.infectionHazards.whiteHoles = [];
+            st.infectionHazards.whiteHoles.push({
+              id: "wh_" + Date.now(),
+              x: st.boss.x,
+              y: st.boss.y,
+              radius: INFECTION_CONFIG.whiteHoleRadius || 75,
+              repelForce: INFECTION_CONFIG.whiteHoleRepelForce || 300,
+              duration: 7.0
+            });
+            this.floatingTexts.push(new FloatingText(st.boss.x, st.boss.y - 20, "⚪ WHITE HOLE ACTIVATED!", "#ffffff"));
+          }
+        }
+
+        // ══════════════ BOSS FIGHT HEART PICKUPS ══════════════
+        st.heartTimer = (st.heartTimer || 0) + dt;
+        if (st.heartTimer >= (INFECTION_CONFIG.heartSpawnInterval || 8.0)) {
+          st.heartTimer = 0;
+          if (!st.pickups) st.pickups = [];
+          const currentHearts = st.pickups.filter(pk => pk.type === "HEART").length;
+          if (currentHearts < (INFECTION_CONFIG.maxHeartsInArena || 4)) {
+            st.pickups.push({
+              id: "heart_" + (st.nextHeartId++),
+              type: "HEART",
+              x: 60 + Math.random() * (SCREEN_WIDTH - 120),
+              y: 60 + Math.random() * (SCREEN_HEIGHT - 120),
+              radius: 14
+            });
+          }
+        }
+
+        // Collect hearts (+10 HP per GDD)
+        for (const p of st.players.values()) {
+          if (!p.isAlive || p.isSpectator) continue;
+          const pcx = p.x + PLAYER_SIZE / 2;
+          const pcy = p.y + PLAYER_SIZE / 2;
+          for (let hIdx = (st.pickups || []).length - 1; hIdx >= 0; hIdx--) {
+            const pk = st.pickups[hIdx];
+            if (pk.type !== "HEART") continue;
+            const dist = Math.hypot(pcx - pk.x, pcy - pk.y);
+            if (dist <= (PLAYER_SIZE / 2 + (pk.radius || 14))) {
+              st.pickups.splice(hIdx, 1);
+              this.mpApplyHeal(p.id, INFECTION_CONFIG.heartHealAmount || 10);
+              this.floatingTexts.push(new FloatingText(p.x, p.y - 15, "+10 HP ❤️", "#22c55e"));
+              break;
+            }
+          }
         }
       }
     }
@@ -6505,8 +7180,24 @@
       this.mpState.processedEvents.add(eventId);
 
       // Decrement target boss HP if boss entity is present
+      shooter.damageDealt = (shooter.damageDealt || 0) + damage;
       if (this.mpState.boss && this.mpState.boss.id === targetId) {
         this.mpState.boss.hp = Math.max(0, this.mpState.boss.hp - damage);
+        if (this.mpState.boss.hp <= 0 && this.mpState.boss.isAlive) {
+          this.mpState.boss.hp = 0;
+          this.mpState.boss.isAlive = false;
+          this.mpState.status = "VICTORY";
+          this.state = "VICTORY";
+          this._broadcastReliable({
+            type: "MP_MATCH_VICTORY",
+            reason: "BOSS_DEFEATED",
+            bossType: this.mpState.boss.type,
+            title: "👑 ARENA CONQUERED!",
+            subtitle: `${this.mpState.boss.name.toUpperCase()} DEFEATED!`
+          });
+          this.sounds?.playVictory?.();
+          this.showAnnouncement("👑 ARENA CONQUERED!", `${this.mpState.boss.name.toUpperCase()} DEFEATED!`);
+        }
       }
 
       this._broadcastReliable({
@@ -6529,6 +7220,10 @@
 
       if (this.mpState.boss && this.mpState.boss.id === msg.targetId) {
         this.mpState.boss.hp = Math.max(0, this.mpState.boss.hp - (msg.damage || 0));
+        if (msg.shooterId) {
+          const sh = this.mpState.players.get(msg.shooterId);
+          if (sh) sh.damageDealt = (sh.damageDealt || 0) + (msg.damage || 0);
+        }
       }
     }
 
@@ -6541,6 +7236,16 @@
       // ── Decrement Player Status Effects ──
       for (const p of this.mpState.players.values()) {
         if (p.suppressedTimer > 0) p.suppressedTimer = Math.max(0, p.suppressedTimer - dt);
+        if (p.freezeTimer > 0) {
+          p.freezeTimer = Math.max(0, p.freezeTimer - dt);
+          if (p.freezeTimer <= 0 && p.freezeType) {
+            p.x = Math.max(60, Math.min(SCREEN_WIDTH - 60 - PLAYER_SIZE, p.x));
+            p.y = Math.max(60, Math.min(SCREEN_HEIGHT - 60 - PLAYER_SIZE, p.y));
+            p.freezeType = null;
+            p.freezeTimer = 0;
+            this.floatingTexts.push(new FloatingText(p.x, p.y - 15, "✨ SAFELY RETURNED!", "#38bdf8"));
+          }
+        }
       }
 
       // ── Adaptive Difficulty Director ──
@@ -7008,6 +7713,41 @@
           ctx.fillText("⚡EMP", cx, barY - 3);
         }
 
+        // Visual Freeze indicator if frozen by Black Hole or White Hole
+        if (p.freezeTimer > 0) {
+          ctx.strokeStyle = "#38bdf8";
+          ctx.lineWidth = 2.5;
+          ctx.beginPath();
+          ctx.arc(cx, cy, PLAYER_SIZE / 2 + 5, 0, Math.PI * 2);
+          ctx.stroke();
+          ctx.fillStyle = "#38bdf8";
+          ctx.font = "bold 9px monospace, sans-serif";
+          ctx.fillText(`❄️ FROZEN (${Math.ceil(p.freezeTimer)}s)`, cx, barY - 14);
+        }
+
+        ctx.restore();
+      }
+
+      const localP = myId ? this.mpState.players.get(myId) : (this.isHost ? this.mpState.players.values().next().value : null);
+      if (localP && localP.freezeTimer > 0) {
+        ctx.save();
+        ctx.fillStyle = "rgba(12, 28, 48, 0.9)";
+        ctx.strokeStyle = "#38bdf8";
+        ctx.lineWidth = 2;
+        const fbW = 340, fbH = 46;
+        const fbX = (SCREEN_WIDTH - fbW) / 2;
+        const fbY = 70;
+        ctx.fillRect(fbX, fbY, fbW, fbH);
+        ctx.strokeRect(fbX, fbY, fbW, fbH);
+
+        ctx.font = "bold 15px monospace, sans-serif";
+        ctx.fillStyle = "#38bdf8";
+        ctx.textAlign = "center";
+        const sourceLabel = localP.freezeType === "WHITE_HOLE" ? "WHITE HOLE EXPULSION" : "BLACK HOLE SINGULARITY";
+        ctx.fillText(`❄️ ${sourceLabel}: ${Math.ceil(localP.freezeTimer)}s`, SCREEN_WIDTH / 2, fbY + 20);
+        ctx.font = "11px system-ui, sans-serif";
+        ctx.fillStyle = "#bae6fd";
+        ctx.fillText("RETURNING SAFELY TO ARENA WHEN TIME EXPIRES", SCREEN_WIDTH / 2, fbY + 38);
         ctx.restore();
       }
 
@@ -7649,7 +8389,7 @@
             }
 
             // Local prediction for smooth 60fps rendering
-            if (myP) {
+            if (myP && (!myP.freezeTimer || myP.freezeTimer <= 0)) {
               let speed = PLAYER_BASE_SPEED;
               if (this.p1.isSprinting) speed *= SPRINT_SPEED_MULT;
               let mx = this.p1Input.x;
@@ -7666,10 +8406,19 @@
               this.p1.y = myP.y;
             }
 
-            // Milestone 6B: Update infection projectiles & weapon cooldown on guest
+            // Milestone 6B & 6C: Update infection projectiles, freeze & weapon cooldown on guest
             if (this.mpState.mode === "INFECTION") {
               if (myP?.infectionWeapon && myP.infectionWeapon.cooldown > 0) {
                 myP.infectionWeapon.cooldown = Math.max(0, myP.infectionWeapon.cooldown - dt);
+              }
+              for (const p of this.mpState.players.values()) {
+                if (p.freezeTimer > 0) {
+                  p.freezeTimer = Math.max(0, p.freezeTimer - dt);
+                  if (p.freezeTimer <= 0 && p.freezeType) {
+                    p.freezeType = null;
+                    p.freezeTimer = 0;
+                  }
+                }
               }
               for (let i = (this.mpState.infectionProjectiles || []).length - 1; i >= 0; i--) {
                 const pr = this.mpState.infectionProjectiles[i];
@@ -7712,7 +8461,7 @@
 
           // Simulate all 2-8 players
           for (const p of this.mpState.players.values()) {
-            if (!p.isAlive || p.isSpectator) {
+            if (!p.isAlive || p.isSpectator || (p.freezeTimer > 0)) {
               p.vx = 0;
               p.vy = 0;
               continue;
@@ -8572,6 +9321,298 @@
       }
     }
 
+    // Milestone 6C: Draw Infection Mode Bosses (Infected Boss & Cosmic Boss), Abilities & Hazards
+    _drawInfectionBossAndCombat(ctx) {
+      if (!this.mpState || this.mpState.mode !== "INFECTION") return;
+
+      const hz = this.mpState.infectionHazards;
+
+      // 1. Draw World Cutting Slash hazards
+      if (hz && Array.isArray(hz.slashes)) {
+        for (const sl of hz.slashes) {
+          ctx.save();
+          if (sl.state === "WARNING") {
+            // 3-second red telegraph line/corridor
+            ctx.strokeStyle = "rgba(239, 68, 68, 0.6)";
+            ctx.lineWidth = sl.width || 48;
+            ctx.beginPath();
+            ctx.moveTo(sl.x1, sl.y1);
+            ctx.lineTo(sl.x2, sl.y2);
+            ctx.stroke();
+
+            // Center laser guide
+            ctx.strokeStyle = "#ffffff";
+            ctx.lineWidth = 2;
+            ctx.setLineDash([8, 8]);
+            ctx.beginPath();
+            ctx.moveTo(sl.x1, sl.y1);
+            ctx.lineTo(sl.x2, sl.y2);
+            ctx.stroke();
+            ctx.setLineDash([]);
+
+            // Warning text
+            const midX = (sl.x1 + sl.x2) / 2;
+            const midY = (sl.y1 + sl.y2) / 2;
+            ctx.fillStyle = "#ef4444";
+            ctx.font = "bold 11px monospace, sans-serif";
+            ctx.textAlign = "center";
+            ctx.fillText(`⚠️ SLASH IN ${Math.max(0, Math.ceil(sl.timer))}s`, midX, midY - 10);
+          } else if (sl.state === "SEVERED") {
+            // Dimensional severance rift (unavailable map section)
+            ctx.strokeStyle = "rgba(168, 85, 247, 0.85)";
+            ctx.lineWidth = sl.width || 48;
+            ctx.shadowColor = "#a855f7";
+            ctx.shadowBlur = 16;
+            ctx.beginPath();
+            ctx.moveTo(sl.x1, sl.y1);
+            ctx.lineTo(sl.x2, sl.y2);
+            ctx.stroke();
+
+            // Inner dark void
+            ctx.strokeStyle = "rgba(15, 23, 42, 0.95)";
+            ctx.lineWidth = (sl.width || 48) - 10;
+            ctx.shadowBlur = 0;
+            ctx.beginPath();
+            ctx.moveTo(sl.x1, sl.y1);
+            ctx.lineTo(sl.x2, sl.y2);
+            ctx.stroke();
+          }
+          ctx.restore();
+        }
+      }
+
+      // 2. Draw Falling Sun Craters (Instant elimination danger)
+      if (hz && Array.isArray(hz.craters)) {
+        for (const cr of hz.craters) {
+          ctx.save();
+          // Molten rim
+          ctx.shadowColor = "#ff4400";
+          ctx.shadowBlur = 14;
+          ctx.fillStyle = "#ff4400";
+          ctx.beginPath();
+          ctx.arc(cr.x, cr.y, cr.radius, 0, Math.PI * 2);
+          ctx.fill();
+
+          // Abyssal core
+          ctx.fillStyle = "#09090b";
+          ctx.beginPath();
+          ctx.arc(cr.x, cr.y, cr.radius * 0.75, 0, Math.PI * 2);
+          ctx.fill();
+
+          // Skull indicator
+          ctx.font = "14px sans-serif";
+          ctx.textAlign = "center";
+          ctx.fillText("💀", cr.x, cr.y + 5);
+          ctx.restore();
+        }
+      }
+
+      // 3. Draw Black Holes
+      if (hz && Array.isArray(hz.blackHoles)) {
+        for (const bh of hz.blackHoles) {
+          ctx.save();
+          // Accretion disk
+          ctx.shadowColor = "#a855f7";
+          ctx.shadowBlur = 20;
+          ctx.strokeStyle = "rgba(168, 85, 247, 0.7)";
+          ctx.lineWidth = 6;
+          ctx.beginPath();
+          ctx.arc(bh.x, bh.y, bh.radius, 0, Math.PI * 2);
+          ctx.stroke();
+
+          // Event horizon
+          ctx.fillStyle = "#000000";
+          ctx.beginPath();
+          ctx.arc(bh.x, bh.y, bh.radius * 0.45, 0, Math.PI * 2);
+          ctx.fill();
+
+          ctx.font = "bold 9px monospace";
+          ctx.fillStyle = "#d8b4fe";
+          ctx.textAlign = "center";
+          ctx.fillText("BLACK HOLE", bh.x, bh.y - bh.radius - 4);
+          ctx.restore();
+        }
+      }
+
+      // 4. Draw White Holes
+      if (hz && Array.isArray(hz.whiteHoles)) {
+        for (const wh of hz.whiteHoles) {
+          ctx.save();
+          ctx.shadowColor = "#38bdf8";
+          ctx.shadowBlur = 25;
+          ctx.fillStyle = "rgba(255, 255, 255, 0.9)";
+          ctx.beginPath();
+          ctx.arc(wh.x, wh.y, wh.radius * 0.4, 0, Math.PI * 2);
+          ctx.fill();
+
+          ctx.strokeStyle = "rgba(56, 189, 248, 0.8)";
+          ctx.lineWidth = 4;
+          ctx.beginPath();
+          ctx.arc(wh.x, wh.y, wh.radius, 0, Math.PI * 2);
+          ctx.stroke();
+
+          ctx.font = "bold 9px monospace";
+          ctx.fillStyle = "#bae6fd";
+          ctx.textAlign = "center";
+          ctx.fillText("WHITE HOLE", wh.x, wh.y - wh.radius - 4);
+          ctx.restore();
+        }
+      }
+
+      // 5. Draw Targeted Jump Telegraph
+      if (hz && hz.jumpTelegraph) {
+        const jt = hz.jumpTelegraph;
+        ctx.save();
+        ctx.strokeStyle = "#ffaa00";
+        ctx.lineWidth = 2.5;
+        ctx.setLineDash([6, 6]);
+        ctx.beginPath();
+        ctx.arc(jt.x, jt.y, jt.radius, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.setLineDash([]);
+
+        ctx.fillStyle = "rgba(255, 170, 0, 0.2)";
+        ctx.beginPath();
+        ctx.arc(jt.x, jt.y, jt.radius, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.font = "bold 12px monospace";
+        ctx.fillStyle = "#ffcc00";
+        ctx.textAlign = "center";
+        ctx.fillText(`JUMP IMPACT (${Math.ceil(jt.timer)}s)`, jt.x, jt.y - jt.radius - 4);
+        ctx.restore();
+      }
+
+      // 6. Draw Falling Sun Projectiles
+      if (Array.isArray(this.mpState.bossProjectiles)) {
+        for (const bp of this.mpState.bossProjectiles) {
+          if (bp.type === "FALLING_SUN") {
+            ctx.save();
+            ctx.shadowColor = "#ffaa00";
+            ctx.shadowBlur = 18;
+            ctx.fillStyle = "#ffaa00";
+            ctx.beginPath();
+            ctx.arc(bp.x, bp.y, bp.radius || 18, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.fillStyle = "#ffffff";
+            ctx.beginPath();
+            ctx.arc(bp.x, bp.y, (bp.radius || 18) * 0.5, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.restore();
+          }
+        }
+      }
+
+      // 7. Draw Boss Heart Pickups (+10 HP)
+      if (Array.isArray(this.mpState.pickups)) {
+        for (const pk of this.mpState.pickups) {
+          if (pk.type === "HEART") {
+            ctx.save();
+            ctx.shadowColor = "#ef4444";
+            ctx.shadowBlur = 12;
+            ctx.fillStyle = "#ef4444";
+            ctx.beginPath();
+            ctx.arc(pk.x, pk.y, pk.radius || 14, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.font = "14px sans-serif";
+            ctx.textAlign = "center";
+            ctx.fillText("❤️", pk.x, pk.y + 5);
+            ctx.restore();
+          }
+        }
+      }
+
+      // 8. Draw Boss (Infected Boss or Cosmic Boss)
+      const b = this.mpState.boss;
+      if (b && b.isAlive) {
+        ctx.save();
+        ctx.translate(b.x, b.y);
+
+        if (b.type === "INFECTED_BOSS") {
+          // Infected Boss: Dark mutated sludge abomination with toxic green veins & red eyes
+          ctx.shadowColor = "#39ff14";
+          ctx.shadowBlur = 24;
+          ctx.fillStyle = "#14532d";
+          ctx.beginPath();
+          ctx.arc(0, 0, b.radius, 0, Math.PI * 2);
+          ctx.fill();
+
+          ctx.fillStyle = "#16a34a";
+          ctx.beginPath();
+          ctx.arc(0, 0, b.radius * 0.7, 0, Math.PI * 2);
+          ctx.fill();
+
+          // Spikes/mutation growths
+          ctx.fillStyle = "#39ff14";
+          for (let i = 0; i < 6; i++) {
+            const angle = (i * Math.PI) / 3;
+            ctx.beginPath();
+            ctx.arc(Math.cos(angle) * (b.radius - 4), Math.sin(angle) * (b.radius - 4), 6, 0, Math.PI * 2);
+            ctx.fill();
+          }
+
+          // Multiple glowing red eyes
+          ctx.fillStyle = "#ef4444";
+          ctx.beginPath();
+          ctx.arc(-10, -6, 3.5, 0, Math.PI * 2);
+          ctx.arc(10, -6, 3.5, 0, Math.PI * 2);
+          ctx.arc(0, 6, 3.5, 0, Math.PI * 2);
+          ctx.fill();
+        } else if (b.type === "COSMIC_BOSS") {
+          // Cosmic Boss: Swirling nebula core with cosmic indigo/purple radiance
+          ctx.shadowColor = "#818cf8";
+          ctx.shadowBlur = 28;
+          ctx.fillStyle = "#1e1b4b";
+          ctx.beginPath();
+          ctx.arc(0, 0, b.radius, 0, Math.PI * 2);
+          ctx.fill();
+
+          ctx.fillStyle = "#4338ca";
+          ctx.beginPath();
+          ctx.arc(0, 0, b.radius * 0.65, 0, Math.PI * 2);
+          ctx.fill();
+
+          // Cosmic rings
+          ctx.strokeStyle = "rgba(165, 180, 252, 0.75)";
+          ctx.lineWidth = 3;
+          ctx.beginPath();
+          ctx.ellipse(0, 0, b.radius + 12, b.radius * 0.45, Math.PI / 4, 0, Math.PI * 2);
+          ctx.stroke();
+
+          // Core starlight
+          ctx.fillStyle = "#ffffff";
+          ctx.beginPath();
+          ctx.arc(0, 0, 7, 0, Math.PI * 2);
+          ctx.fill();
+        }
+
+        ctx.restore();
+
+        // Overhead health bar
+        ctx.save();
+        const barW = 110;
+        const barH = 8;
+        const barX = b.x - barW / 2;
+        const barY = b.y - b.radius - 20;
+        const hpRatio = Math.max(0, b.hp / (b.maxHp || 2500));
+        const barColor = b.type === "INFECTED_BOSS" ? "#22c55e" : "#818cf8";
+
+        ctx.fillStyle = "rgba(0,0,0,0.75)";
+        ctx.fillRect(barX - 1, barY - 1, barW + 2, barH + 2);
+        ctx.fillStyle = barColor;
+        ctx.fillRect(barX, barY, barW * hpRatio, barH);
+        ctx.strokeStyle = "#ffffff";
+        ctx.lineWidth = 1;
+        ctx.strokeRect(barX - 1, barY - 1, barW + 2, barH + 2);
+
+        ctx.fillStyle = "#ffffff";
+        ctx.font = "bold 9px monospace";
+        ctx.textAlign = "center";
+        ctx.fillText(`${b.name.toUpperCase()}: ${b.hp}/${b.maxHp}`, b.x, barY - 4);
+        ctx.restore();
+      }
+    }
+
     draw() {
       const ctx = this.ctx;
 
@@ -8613,7 +9654,7 @@
         this._drawDemonBossAndCombat(ctx);
       }
 
-      // Milestone 6B: Draw Infection Mode weapon pickups and projectiles
+      // Milestone 6B & 6C: Draw Infection Mode weapon pickups, projectiles, bosses & hazards
       if (isInfectionMP && this.mpState) {
         if (Array.isArray(this.mpState.weaponPickups)) {
           this._drawInfectionWeaponPickups(ctx, this.mpState.weaponPickups);
@@ -8621,6 +9662,7 @@
         if (Array.isArray(this.mpState.infectionProjectiles)) {
           this._drawInfectionProjectiles(ctx, this.mpState.infectionProjectiles);
         }
+        this._drawInfectionBossAndCombat(ctx);
       }
 
       // Draw Enemies (normal)
@@ -8733,9 +9775,14 @@
         ctx.restore();
       }
 
-      // Milestone 6A & 6B: Infection Mode HUD (top-center)
-      if (isInfectionMP && this.mpState && this.mpState.status === "PLAYING") {
+      // Milestone 6A, 6B & 6C: Infection Mode HUD (top-center)
+      if (isInfectionMP && this.mpState && (this.mpState.status === "PLAYING" || this.mpState.status === "VICTORY")) {
         ctx.save();
+        const hasBoss = (this.mpState.boss && this.mpState.boss.isAlive);
+        const myId = this.peer ? this.peer.id : (this.isHost ? "host" : "guest");
+        const myP = this.mpState.players.get(myId) || (this.isHost ? this.mpState.players.values().next().value : null);
+        const hasWeapon = myP?.infectionWeapon;
+
         let survivorCount = 0;
         let infectedCount = 0;
         for (const p of this.mpState.players.values()) {
@@ -8743,16 +9790,13 @@
           if (p.isInfected) infectedCount++;
           else survivorCount++;
         }
-        const myId = this.peer ? this.peer.id : (this.isHost ? "host" : "guest");
-        const myP = this.mpState.players.get(myId) || (this.isHost ? this.mpState.players.values().next().value : null);
-        const hasWeapon = myP?.infectionWeapon;
 
-        const hudW = 240;
-        const hudH = hasWeapon ? 48 : 34;
+        const hudW = hasBoss ? 260 : 240;
+        const hudH = (hasBoss && hasWeapon) ? 52 : (hasBoss ? 38 : (hasWeapon ? 48 : 34));
         const hudX = (SCREEN_WIDTH - hudW) / 2;
         const hudY = 8;
-        ctx.fillStyle = "rgba(4,13,8,0.85)";
-        ctx.strokeStyle = "#00ff66";
+        ctx.fillStyle = "rgba(4,13,8,0.88)";
+        ctx.strokeStyle = hasBoss ? (this.mpState.boss.type === "INFECTED_BOSS" ? "#22c55e" : "#818cf8") : "#00ff66";
         ctx.lineWidth = 1.5;
         ctx.beginPath();
         if (typeof ctx.roundRect === "function") {
@@ -8763,16 +9807,32 @@
         ctx.fill();
         ctx.stroke();
 
-        ctx.font = "bold 11px system-ui, monospace";
         ctx.textAlign = "center";
-        ctx.fillStyle = "#00ff66";
-        ctx.fillText(`☣️ SURVIVORS: ${survivorCount}  |  INFECTED: ${infectedCount}`, SCREEN_WIDTH / 2, hudY + 18);
+        if (hasBoss) {
+          const bossColor = this.mpState.boss.type === "INFECTED_BOSS" ? "#22c55e" : "#818cf8";
+          ctx.fillStyle = bossColor;
+          ctx.font = "bold 11px monospace, sans-serif";
+          ctx.fillText(`⚡ ${this.mpState.boss.name.toUpperCase()} CONFRONTATION`, SCREEN_WIDTH / 2, hudY + 13);
+          ctx.fillStyle = "#ffcc00";
+          ctx.font = "bold 13px monospace, sans-serif";
+          ctx.fillText(`BOSS HP: ${this.mpState.boss.hp} / 2500`, SCREEN_WIDTH / 2, hudY + 28);
+          if (hasWeapon) {
+            const ammoStr = myP.infectionWeapon.ammo === Infinity ? "∞" : `${myP.infectionWeapon.ammo}/150`;
+            ctx.fillStyle = myP.infectionWeapon.ammo === Infinity ? "#ffff00" : (myP.infectionWeapon.ammo > 30 ? "#00ffea" : "#ff4444");
+            ctx.font = "bold 10px monospace, sans-serif";
+            ctx.fillText(`🔫 ${myP.infectionWeapon.name.toUpperCase()}: ${ammoStr}`, SCREEN_WIDTH / 2, hudY + 44);
+          }
+        } else {
+          ctx.font = "bold 11px system-ui, monospace";
+          ctx.fillStyle = "#00ff66";
+          ctx.fillText(`☣️ SURVIVORS: ${survivorCount}  |  INFECTED: ${infectedCount}`, SCREEN_WIDTH / 2, hudY + 18);
 
-        if (hasWeapon) {
-          const ammoStr = myP.infectionWeapon.ammo === Infinity ? "∞" : `${myP.infectionWeapon.ammo}/150`;
-          ctx.fillStyle = myP.infectionWeapon.ammo === Infinity ? "#ffff00" : (myP.infectionWeapon.ammo > 30 ? "#00ffea" : "#ff4444");
-          ctx.font = "bold 10px monospace, sans-serif";
-          ctx.fillText(`🔫 ${myP.infectionWeapon.name.toUpperCase()}: ${ammoStr}`, SCREEN_WIDTH / 2, hudY + 36);
+          if (hasWeapon) {
+            const ammoStr = myP.infectionWeapon.ammo === Infinity ? "∞" : `${myP.infectionWeapon.ammo}/150`;
+            ctx.fillStyle = myP.infectionWeapon.ammo === Infinity ? "#ffff00" : (myP.infectionWeapon.ammo > 30 ? "#00ffea" : "#ff4444");
+            ctx.font = "bold 10px monospace, sans-serif";
+            ctx.fillText(`🔫 ${myP.infectionWeapon.name.toUpperCase()}: ${ammoStr}`, SCREEN_WIDTH / 2, hudY + 36);
+          }
         }
         ctx.restore();
       }
@@ -8881,6 +9941,77 @@
         ctx.fillStyle = "#ffffff";
         ctx.font = "bold 18px monospace, sans-serif";
         ctx.fillText(`Final Score: ${this.p1Score} | All 5 Levels Conquered!`, SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2 + 20);
+      } else if (this.mode === "CUSTOM_ROOM" && this.mpState && this.mpState.mode === "INFECTION") {
+        // Milestone 6C: Infection Mode Match Resolution & Squad Ranking UI
+        const isVictory = (this.mpState.status === "VICTORY" || this.state === "VICTORY");
+        const title = isVictory ? "👑 TEAM VICTORY!" : "💀 TEAM WIPEOUT!";
+        const titleColor = isVictory ? "#ffcc00" : "#ff3344";
+        const bossName = this.mpState.boss?.name ? this.mpState.boss.name.toUpperCase() : "BOSS";
+        const subtitle = isVictory
+          ? `${bossName} DEFEATED!`
+          : "ALL PLAYERS ELIMINATED!";
+
+        ctx.fillStyle = titleColor;
+        ctx.font = "bold 42px monospace, sans-serif";
+        ctx.fillText(title, SCREEN_WIDTH / 2, 65);
+
+        ctx.fillStyle = isVictory ? "#00ff88" : "#ffaa00";
+        ctx.font = "bold 18px monospace, sans-serif";
+        ctx.fillText(subtitle, SCREEN_WIDTH / 2, 98);
+
+        ctx.fillStyle = "#ffffff";
+        ctx.font = "bold 14px monospace, sans-serif";
+        ctx.fillText("── SQUAD BATTLE PERFORMANCE & RANKINGS ──", SCREEN_WIDTH / 2, 134);
+
+        // Sort players by damageDealt descending
+        const rankedPlayers = Array.from(this.mpState.players.values()).sort((a, b) => {
+          return (b.damageDealt || 0) - (a.damageDealt || 0);
+        });
+
+        const startY = 168;
+        const rowH = 34;
+
+        ctx.font = "13px monospace, sans-serif";
+        rankedPlayers.forEach((p, rIdx) => {
+          if (rIdx >= 8) return;
+          const y = startY + rIdx * rowH;
+          const isAlive = p.isAlive && !p.isSpectator;
+          const statusText = isAlive ? "🟢 SURVIVED" : "💀 ELIMINATED";
+          const statusColor = isAlive ? "#00ff88" : "#ef4444";
+          const weaponName = p.infectionWeapon ? p.infectionWeapon.name : "Unarmed";
+          const dmg = p.damageDealt || 0;
+
+          ctx.fillStyle = "rgba(255, 255, 255, 0.05)";
+          ctx.fillRect(SCREEN_WIDTH / 2 - 250, y - 20, 500, 26);
+
+          ctx.textAlign = "left";
+          ctx.fillStyle = "#ffcc00";
+          ctx.fillText(`#${rIdx + 1}`, SCREEN_WIDTH / 2 - 240, y - 2);
+
+          ctx.fillStyle = p.color || "#00e5ff";
+          const pName = p.name ? (p.name.length > 12 ? p.name.slice(0, 11) + "…" : p.name) : `Player ${rIdx + 1}`;
+          ctx.fillText(pName, SCREEN_WIDTH / 2 - 200, y - 2);
+
+          ctx.fillStyle = "#94a3b8";
+          ctx.fillText(`[${weaponName}]`, SCREEN_WIDTH / 2 - 80, y - 2);
+
+          ctx.fillStyle = "#38bdf8";
+          ctx.fillText(`DMG: ${dmg}`, SCREEN_WIDTH / 2 + 70, y - 2);
+
+          ctx.textAlign = "right";
+          ctx.fillStyle = statusColor;
+          ctx.fillText(statusText, SCREEN_WIDTH / 2 + 240, y - 2);
+        });
+
+        ctx.textAlign = "center";
+        const blink = Math.floor(this.gameTime * 2.5) % 2 === 0;
+        if (blink) {
+          ctx.fillStyle = "#00e5ff";
+          ctx.font = "bold 15px system-ui, sans-serif";
+          ctx.fillText("TAP OR PRESS ENTER TO RETURN TO LOBBY", SCREEN_WIDTH / 2, SCREEN_HEIGHT - 35);
+        }
+        ctx.restore();
+        return;
       } else if (this.state === "VICTORY") {
         ctx.fillStyle = "#ffcc00";
         ctx.font = "bold 50px monospace, sans-serif";

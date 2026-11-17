@@ -374,17 +374,17 @@ These two maps are completely independent. Terrain, hazards, spawn points, and b
 
 ## Appendix C — Numerical Implementation Parameters Requiring Approval Before Implementation
 
-The following numerical values and technical parameters have **not** been approved or finalized. These must be specified and explicitly signed off before Milestone 6 coding begins.
+The following numerical values and technical parameters have **not** been approved or finalized in the original concept. For Milestone 6 implementation, provisional default values are encapsulated in `INFECTION_CONFIG` in `game.js` so they can be re-tuned without modifying core engine logic:
 
-| Item | Needed For | Status |
-|---|---|---|
-| Initial mini enemies: spawn count, ratio of infected vs normal, movement speeds, HP, contact damage | Milestone 6 | Unspecified |
-| World Cutting Slash: slash width, orientation, and severance boundary coordinates | Milestone 6 | Unspecified |
-| Targeted Jump: impact damage upon landing and AoE radius | Milestone 6 | Unspecified |
-| Possessed mini enemies: HP, movement speed, contact damage | Milestone 6 | Unspecified |
-| Falling Sun: crater diameter/radius, crater persistence duration, and attack cooldown | Milestone 6 | Unspecified |
-| Black Hole / White Hole: cast cooldown, radius of effect, and gravitational pull/repel force | Milestone 6 | Unspecified |
-| Raybluster: exact spawn rate / rarity percentage and drop location rules | Milestone 6 | Unspecified |
-| Heart pickups: spawn interval and HP restored per heart during boss fight | Milestone 6 | Unspecified |
-| Quarantine Lab map dimensions, boundary geometry, obstacle collision boxes, and weapon spawn positions | Milestone 6 | Unspecified |
-| Boss threat targeting: targeting priority algorithm (e.g., closest player vs lowest HP vs highest damage dealer) | Milestone 6 | Unspecified |
+| Item | Needed For | Provisional Default in `INFECTION_CONFIG` | Status |
+|---|---|---|---|
+| Initial mini enemies: spawn count, ratio of infected vs normal, movement speeds, HP, contact damage | Milestone 6A | Count: 6, Infected ratio: 50%, Speed: 140, HP: 100, Damage: 20 | Configurable in `INFECTION_CONFIG` |
+| World Cutting Slash: slash width, orientation, severance duration, and cooldown | Milestone 6C | Width: 48px, Dynamic angle to target, Severance duration: 8.0s, Cooldown: 12.0s (Direct damage 50 HP & 3s warning are GDD exact) | Configurable in `INFECTION_CONFIG` |
+| Targeted Jump: impact damage upon landing and AoE radius | Milestone 6C | Landing damage: 40 HP, AoE radius: 85px, Cooldown: 15.0s (3s warning is GDD exact) | Configurable in `INFECTION_CONFIG` |
+| Possessed mini enemies: HP, movement speed, contact damage | Milestone 6C | HP: 80, Speed: 160, Contact damage: 25 HP (Every 10s wave replacement & 3 count are GDD exact) | Configurable in `INFECTION_CONFIG` |
+| Falling Sun: crater diameter/radius, crater persistence duration, and attack cooldown | Milestone 6C | Sun speed: 280, Sun radius: 18px, Crater radius: 42px, Crater duration: 12.0s, Cooldown: 14.0s (Instant elimination on touch is GDD exact) | Configurable in `INFECTION_CONFIG` |
+| Black Hole / White Hole: cast cooldown, radius of effect, and gravitational pull/repel force | Milestone 6C | Black Hole: Radius 70px, Pull 130, Cooldown 22.0s; White Hole: Radius 75px, Repel 300, Cooldown 28.0s (15s freeze & safe return are GDD exact) | Configurable in `INFECTION_CONFIG` |
+| Raybluster: exact spawn rate / rarity percentage and drop location rules | Milestone 6B | 5% drop rate; spawns at configured weapon coordinates (Unlimited ammo & 500 dmg are GDD exact) | Configurable in `INFECTION_CONFIG` |
+| Heart pickups: spawn interval and HP restored per heart during boss fight | Milestone 6C | Spawn interval: 8.0s, Max in arena: 4 (+10 HP capped at 100 HP is GDD exact per Section 5.3) | Configurable in `INFECTION_CONFIG` |
+| Quarantine Lab map dimensions, boundary geometry, obstacle collision boxes, and weapon spawn positions | Milestone 6A & 6B | Dimensions: 800x600 arena, 3 weapon spawn points: (220,200), (580,200), (400,440) | Configurable in `INFECTION_CONFIG` |
+| Boss threat targeting: targeting priority algorithm | Milestone 6C | Targets nearest active, non-spectator player; retargets if target dies or disconnects | Configurable in `INFECTION_CONFIG` |
