@@ -165,15 +165,80 @@
       this.muted = false;
       this.customFailSound = (typeof Audio !== "undefined") ? new Audio("gameover.mp3") : null;
       if (this.customFailSound) this.customFailSound.preload = "auto";
+
+      // Pew sound buffer & audio pool for rapid overlapping gunshot sounds
+      this.pewBuffer = null;
+      this.pewPool = [];
+      this.pewIndex = 0;
+      if (typeof Audio !== "undefined") {
+        for (let i = 0; i < 8; i++) {
+          const a = new Audio("pew.mp3");
+          a.preload = "auto";
+          this.pewPool.push(a);
+        }
+      }
+      this._loadPewAudio();
+    }
+
+    _loadPewAudio() {
+      if (typeof fetch === "undefined") return;
+      fetch("pew.mp3")
+        .then(res => res.arrayBuffer())
+        .then(buf => {
+          this._init();
+          if (this.ctx) {
+            this.ctx.decodeAudioData(buf, (decoded) => {
+              this.pewBuffer = decoded;
+            }, () => {});
+          } else {
+            this._pendingPewBuffer = buf;
+          }
+        })
+        .catch(() => {});
     }
 
     _init() {
       if (!this.ctx) {
         const AudioCtx = window.AudioContext || window.webkitAudioContext;
         if (AudioCtx) this.ctx = new AudioCtx();
+        if (this.ctx && this._pendingPewBuffer) {
+          const b = this._pendingPewBuffer;
+          delete this._pendingPewBuffer;
+          this.ctx.decodeAudioData(b, (decoded) => {
+            this.pewBuffer = decoded;
+          }, () => {});
+        }
       }
       if (this.ctx && this.ctx.state === "suspended") {
         this.ctx.resume().catch(() => {});
+      }
+    }
+
+    playPew() {
+      if (this.muted) return;
+      this._init();
+      // 1. Preferred: Web Audio BufferSource (0ms latency, unlimited overlapping voices)
+      if (this.ctx && this.pewBuffer) {
+        try {
+          const src = this.ctx.createBufferSource();
+          src.buffer = this.pewBuffer;
+          const gain = this.ctx.createGain();
+          gain.gain.value = 0.55;
+          src.connect(gain);
+          gain.connect(this.ctx.destination);
+          src.start(0);
+          return;
+        } catch (_) {}
+      }
+      // 2. Fallback: Rotating Audio Pool
+      if (this.pewPool && this.pewPool.length > 0) {
+        const sound = this.pewPool[this.pewIndex % this.pewPool.length];
+        this.pewIndex++;
+        sound.currentTime = 0;
+        sound.play().catch(() => {});
+      } else {
+        // 3. Fallback synth tone
+        this.playTone(880, "square", 0.08, 0.3);
       }
     }
 
@@ -3848,7 +3913,7 @@
       const dist = Math.hypot(fx, fy) || 1;
       this.playerBullets.push({ x: px, y: py, vx: (fx/dist)*350, vy: (fy/dist)*350, dmg: isL5 ? 200 : 100, life: 2.0 });
       this.gunCooldown = isL5 ? 0.08 : 0.15;
-      this.sounds.playTone(880, "square", 0.08, 0.3);
+      this.sounds.playPew();
       this.updateHUD();
     }
 
@@ -4021,7 +4086,7 @@
       const d = Math.hypot(fx,fy)||1;
       this.playerBullets.push({ x:px, y:py, vx:(fx/d)*350, vy:(fy/d)*350, dmg:isL5?200:100, life:2.0 });
       this.gunCooldown = isL5 ? 0.08 : 0.15;
-      this.sounds.playTone(880,"square",0.08,0.3);
+      this.sounds.playPew();
       this.updateHUD();
     }
 
