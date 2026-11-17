@@ -4530,6 +4530,28 @@
           }
           break;
 
+        // Milestone 5B: Elite Mode phase transition event
+        case "MP_PHASE_TRANSITION":
+          if (this.mpState && !this.isHost) {
+            this.mpState.currentPhase = msg.phase;
+            if (msg.teamScore !== undefined) this.mpState.teamScore = msg.teamScore;
+            if (msg.phase === 4) {
+              this.mpState.scoreActive = false;
+              if (this.mpState.hazards) {
+                this.mpState.hazards.toxicGas = [];
+                this.mpState.hazards.laserWall = null;
+              }
+              this.showAnnouncement("DEMON BOSS AWAKENS", "SURVIVE THE FINAL CONQUEST");
+            } else if (msg.phase === 3) {
+              this.showAnnouncement("CRUCIBLE OVERLOAD", "LASER WALL ACTIVATED - MINI ENEMIES HALTED");
+            } else if (msg.phase === 2) {
+              this.showAnnouncement("HAZARD WARNING", "TOXIC GAS VAPORS DEPLOYED");
+            } else if (msg.phase === 1) {
+              this.showAnnouncement("HAZARD WARNING", "SMOKE BOMBS DEPLOYED");
+            }
+          }
+          break;
+
         // Legacy connection handling (for backwards compat with 2-player mode)
         default:
           if (this.state === "PLAYING") this._handleGameplayMessage(msg);
@@ -4614,12 +4636,24 @@
         processedEvents: new Set(),
         seq: 0,
         startTime: Date.now(),
-        // --- Milestone 5A: Elite Mode foundation fields ---
+        // --- Milestone 5A & 5B: Elite Mode foundation & hazards fields ---
         teamScore: 0,       // shared team score (Elite only)
-        scoreActive: true,  // halts at boss spawn (Phase 5B+)
+        scoreActive: true,  // halts at boss spawn (200 pts)
         pickups: [],        // { id, type:"SCORE"|"HEART", x, y }
         nextPickupId: 1,
-        elitePickupTimer: 0 // provisional spawn timer
+        elitePickupTimer: 0, // provisional spawn timer
+        nextHazardId: 1,
+        currentPhase: 0,     // 0: <30, 1: 30-69 (smoke), 2: 70-119 (gas), 3: 120-199 (laser), 4: >=200 (boss transition)
+        hazards: {
+          smokeBombs: [],
+          toxicGas: [],
+          laserWall: null
+        },
+        hazardTimers: {
+          smoke: 0,
+          gas: 0,
+          laser: 0
+        }
       };
 
       const SPAWN_POINTS = [
@@ -4730,12 +4764,18 @@
         processedEvents: new Set(),
         seq: 0,
         startTime: Date.now(),
-        // --- Milestone 5A: Elite Mode foundation fields ---
+        // --- Milestone 5A & 5B: Elite Mode foundation & hazards fields ---
         teamScore: msg.teamScore || 0,
-        scoreActive: true,
+        scoreActive: msg.scoreActive !== undefined ? msg.scoreActive : true,
         pickups: [],
         nextPickupId: msg.nextPickupId || 1,
-        elitePickupTimer: 0
+        elitePickupTimer: 0,
+        currentPhase: msg.currentPhase || 0,
+        hazards: {
+          smokeBombs: [],
+          toxicGas: [],
+          laserWall: null
+        }
       };
 
       if (Array.isArray(msg.players)) {
@@ -4823,7 +4863,32 @@
           type: pk.type,
           x: Math.round(pk.x * 10) / 10,
           y: Math.round(pk.y * 10) / 10
-        }))
+        })),
+        // Milestone 5B: Elite Mode hazards & phase sync
+        currentPhase: this.mpState.currentPhase || 0,
+        hazards: {
+          smokeBombs: (this.mpState.hazards?.smokeBombs || []).map(sb => ({
+            id: sb.id,
+            x: Math.round(sb.x),
+            y: Math.round(sb.y),
+            radius: sb.radius,
+            state: sb.state,
+            fuse: Math.round(sb.fuse * 10) / 10,
+            duration: Math.round(sb.duration * 10) / 10
+          })),
+          toxicGas: (this.mpState.hazards?.toxicGas || []).map(tg => ({
+            id: tg.id,
+            x: Math.round(tg.x),
+            y: Math.round(tg.y),
+            radius: tg.radius,
+            duration: Math.round(tg.duration * 10) / 10
+          })),
+          laserWall: this.mpState.hazards?.laserWall && this.mpState.hazards.laserWall.active ? {
+            x: Math.round(this.mpState.hazards.laserWall.x),
+            width: this.mpState.hazards.laserWall.width,
+            active: true
+          } : null
+        }
       };
       this._broadcastUnreliable(snapshot);
     }
@@ -4953,6 +5018,18 @@
           x: pk.x,
           y: pk.y
         }));
+      }
+
+      // Milestone 5B: Sync Elite Mode hazards & phase on guest
+      if (msg.currentPhase !== undefined) {
+        this.mpState.currentPhase = msg.currentPhase;
+      }
+      if (msg.hazards) {
+        this.mpState.hazards = {
+          smokeBombs: Array.isArray(msg.hazards.smokeBombs) ? msg.hazards.smokeBombs : [],
+          toxicGas: Array.isArray(msg.hazards.toxicGas) ? msg.hazards.toxicGas : [],
+          laserWall: msg.hazards.laserWall || null
+        };
       }
     }
 
@@ -5199,89 +5276,262 @@
     }
 
     // ══════════════════════════════════════════════════════════════
-    // MILESTONE 5A: Elite Mode host-authoritative pickup update
-    // Provisional spawn rates documented below (not in Appendix B):
-    //   SCORE pickup: every 3s, max 5 on field (+5 pts each)
-    //   HEART pickup: every 8s, max 3 on field (+10 HP each, capped at maxHp)
-    // These values are PROVISIONAL and require explicit approval before Appendix B.
+    // MILESTONE 5A & 5B: Elite Mode Host-Authoritative Engine
+    // Pickups (5A) + Environmental Hazards & Score Thresholds (5B)
+    // 30 pts: Smoke Bombs (2s fuse, 3s duration, 20 HP on entry)
+    // 70 pts: Toxic Gas (spawns every 5s, lasts 10s, 10 HP every 0.5s)
+    // 120 pts: Mini enemies halt. Laser Wall (every 15s, 60 HP direct hit)
+    // 200 pts: Toxic gas & laser halt. Smoke bombs continue. Scoring halts.
     // ══════════════════════════════════════════════════════════════
     mpUpdateElite(dt) {
       if (!this.isHost || !this.mpState) return;
       if (this.mpState.mode !== "ELITE") return;
-      if (!this.mpState.scoreActive) return; // scoring frozen (boss phase – 5B+)
 
       const st = this.mpState;
-      st.elitePickupTimer = (st.elitePickupTimer || 0) + dt;
-
-      // --- PROVISIONAL: Spawn score pickup every 3s (max 5) ---
-      const SCORE_INTERVAL = 3.0;   // provisional
-      const SCORE_MAX      = 5;     // provisional
-      // --- PROVISIONAL: Spawn heart pickup every 8s (max 3) ---
-      const HEART_INTERVAL = 8.0;   // provisional
-      const HEART_MAX      = 3;     // provisional
-
-      const scoreCount = st.pickups.filter(p => p.type === "SCORE").length;
-      const heartCount = st.pickups.filter(p => p.type === "HEART").length;
-
-      if (st.elitePickupTimer >= Math.min(SCORE_INTERVAL, HEART_INTERVAL)) {
-        // Spawn score pickup if below cap
-        if (scoreCount < SCORE_MAX) {
-          st.pickups.push({
-            id: st.nextPickupId++,
-            type: "SCORE",
-            x: 60 + Math.random() * (SCREEN_WIDTH  - 120),
-            y: 60 + Math.random() * (SCREEN_HEIGHT - 120)
-          });
-        }
-        // Spawn heart pickup if below cap (only on slower interval)
-        // Use elitePickupTimer check with separate heart timer tracking
-        if (heartCount < HEART_MAX && (st.eliteHeartTimer || 0) >= HEART_INTERVAL) {
-          st.pickups.push({
-            id: st.nextPickupId++,
-            type: "HEART",
-            x: 60 + Math.random() * (SCREEN_WIDTH  - 120),
-            y: 60 + Math.random() * (SCREEN_HEIGHT - 120)
-          });
-          st.eliteHeartTimer = 0;
-        }
-        st.elitePickupTimer = 0;
+      if (!st.hazards) {
+        st.hazards = { smokeBombs: [], toxicGas: [], laserWall: null };
       }
-      // Track heart timer independently
-      st.eliteHeartTimer = (st.eliteHeartTimer || 0) + dt;
+      if (!st.hazardTimers) {
+        st.hazardTimers = { smoke: 0, gas: 0, laser: 0 };
+      }
 
-      // --- Pickup collection (host checks each alive player vs each pickup) ---
-      const PICKUP_RADIUS = 22; // px — collision distance (provisional)
-      const collected = new Set();
+      // ── 1. Evaluate Score Thresholds & Phase Transitions ──
+      const score = st.teamScore || 0;
+      let targetPhase = 0;
+      if (score >= 200) targetPhase = 4;
+      else if (score >= 120) targetPhase = 3;
+      else if (score >= 70) targetPhase = 2;
+      else if (score >= 30) targetPhase = 1;
 
-      for (const p of st.players.values()) {
-        if (!p.isAlive || p.isSpectator) continue;
-        const pcx = p.x + PLAYER_SIZE / 2;
-        const pcy = p.y + PLAYER_SIZE / 2;
+      if (targetPhase !== st.currentPhase) {
+        st.currentPhase = targetPhase;
+        if (st.currentPhase === 4) {
+          // 200 pts: Demon Boss threshold
+          st.scoreActive = false; // Stop score collection permanently
+          st.hazards.toxicGas = [];
+          st.hazards.laserWall = null;
+          this.showAnnouncement("DEMON BOSS AWAKENS", "SURVIVE THE FINAL CONQUEST");
+        } else if (st.currentPhase === 3) {
+          this.showAnnouncement("CRUCIBLE OVERLOAD", "LASER WALL ACTIVATED - MINI ENEMIES HALTED");
+        } else if (st.currentPhase === 2) {
+          this.showAnnouncement("HAZARD WARNING", "TOXIC GAS VAPORS DEPLOYED");
+        } else if (st.currentPhase === 1) {
+          this.showAnnouncement("HAZARD WARNING", "SMOKE BOMBS DEPLOYED");
+        }
 
-        for (const pk of st.pickups) {
-          if (collected.has(pk.id)) continue;
-          const dist = Math.hypot(pcx - pk.x, pcy - pk.y);
-          if (dist <= PICKUP_RADIUS) {
-            collected.add(pk.id);
-            if (pk.type === "SCORE") {
-              st.teamScore += 5;
-              this.floatingTexts.push(new FloatingText(pk.x, pk.y - 10, "+5 🏆", "#00ff88"));
-              // Broadcast authoritative score update
-              this._broadcastReliable({
-                type: "MP_SCORE_UPDATE",
-                teamScore: st.teamScore
-              });
-            } else if (pk.type === "HEART") {
-              const eventId = `heal_pk_${pk.id}_${p.id}`;
-              this.mpApplyHeal(p.id, 10, eventId);
+        this._broadcastReliable({
+          type: "MP_PHASE_TRANSITION",
+          phase: st.currentPhase,
+          teamScore: st.teamScore
+        });
+      }
+
+      // ── 2. Pickups Spawning & Collection (Active only before 200 pts) ──
+      if (st.scoreActive) {
+        st.elitePickupTimer = (st.elitePickupTimer || 0) + dt;
+        const SCORE_INTERVAL = 3.0; // provisional
+        const SCORE_MAX      = 5;   // provisional
+        const HEART_INTERVAL = 8.0; // provisional
+        const HEART_MAX      = 3;   // provisional
+
+        const scoreCount = st.pickups.filter(p => p.type === "SCORE").length;
+        const heartCount = st.pickups.filter(p => p.type === "HEART").length;
+
+        if (st.elitePickupTimer >= Math.min(SCORE_INTERVAL, HEART_INTERVAL)) {
+          if (scoreCount < SCORE_MAX) {
+            st.pickups.push({
+              id: st.nextPickupId++,
+              type: "SCORE",
+              x: 60 + Math.random() * (SCREEN_WIDTH  - 120),
+              y: 60 + Math.random() * (SCREEN_HEIGHT - 120)
+            });
+          }
+          if (heartCount < HEART_MAX && (st.eliteHeartTimer || 0) >= HEART_INTERVAL) {
+            st.pickups.push({
+              id: st.nextPickupId++,
+              type: "HEART",
+              x: 60 + Math.random() * (SCREEN_WIDTH  - 120),
+              y: 60 + Math.random() * (SCREEN_HEIGHT - 120)
+            });
+            st.eliteHeartTimer = 0;
+          }
+          st.elitePickupTimer = 0;
+        }
+        st.eliteHeartTimer = (st.eliteHeartTimer || 0) + dt;
+
+        // Pickup collection
+        const PICKUP_RADIUS = 22;
+        const collected = new Set();
+        for (const p of st.players.values()) {
+          if (!p.isAlive || p.isSpectator) continue;
+          const pcx = p.x + PLAYER_SIZE / 2;
+          const pcy = p.y + PLAYER_SIZE / 2;
+
+          for (const pk of st.pickups) {
+            if (collected.has(pk.id)) continue;
+            const dist = Math.hypot(pcx - pk.x, pcy - pk.y);
+            if (dist <= PICKUP_RADIUS) {
+              collected.add(pk.id);
+              if (pk.type === "SCORE") {
+                st.teamScore += 5;
+                this.floatingTexts.push(new FloatingText(pk.x, pk.y - 10, "+5 🏆", "#00ff88"));
+                this._broadcastReliable({
+                  type: "MP_SCORE_UPDATE",
+                  teamScore: st.teamScore
+                });
+              } else if (pk.type === "HEART") {
+                const eventId = `heal_pk_${pk.id}_${p.id}`;
+                this.mpApplyHeal(p.id, 10, eventId);
+              }
+            }
+          }
+        }
+        if (collected.size > 0) {
+          st.pickups = st.pickups.filter(pk => !collected.has(pk.id));
+        }
+      }
+
+      // ── 3. Environmental Hazards: Smoke Bombs (Phases 1, 2, 3, 4) ──
+      // GDD exact: activates at 30 pts, 2.0s fuse, 3.0s duration, 20 HP on entry. Continues at 200 pts.
+      if (st.currentPhase >= 1) {
+        st.hazardTimers.smoke = (st.hazardTimers.smoke || 0) + dt;
+        const SMOKE_SPAWN_INTERVAL = 4.0; // provisional (Appendix C)
+        const SMOKE_MAX = 4;              // provisional
+        if (st.hazardTimers.smoke >= SMOKE_SPAWN_INTERVAL) {
+          st.hazardTimers.smoke = 0;
+          if (st.hazards.smokeBombs.length < SMOKE_MAX) {
+            st.hazards.smokeBombs.push({
+              id: "sb_" + (st.nextHazardId++),
+              x: 80 + Math.random() * (SCREEN_WIDTH - 160),
+              y: 80 + Math.random() * (SCREEN_HEIGHT - 160),
+              radius: 50,      // provisional (Appendix C)
+              fuse: 2.0,       // GDD exact: 2s fuse
+              duration: 3.0,   // GDD exact: 3s duration
+              state: "FUSE",
+              enteredPlayers: new Set()
+            });
+          }
+        }
+
+        // Update active smoke bombs
+        for (let i = st.hazards.smokeBombs.length - 1; i >= 0; i--) {
+          const sb = st.hazards.smokeBombs[i];
+          if (sb.state === "FUSE") {
+            sb.fuse -= dt;
+            if (sb.fuse <= 0) {
+              sb.state = "ACTIVE";
+              this.floatingTexts.push(new FloatingText(sb.x, sb.y - 15, "💥 SMOKE!", "#ff8800"));
+            }
+          }
+          if (sb.state === "ACTIVE") {
+            sb.duration -= dt;
+            // Entry damage check: 20 HP on entry
+            for (const p of st.players.values()) {
+              if (!p.isAlive || p.isSpectator) continue;
+              const pcx = p.x + PLAYER_SIZE / 2;
+              const pcy = p.y + PLAYER_SIZE / 2;
+              const dist = Math.hypot(pcx - sb.x, pcy - sb.y);
+              if (dist <= sb.radius + PLAYER_SIZE / 2) {
+                if (!sb.enteredPlayers.has(p.id)) {
+                  sb.enteredPlayers.add(p.id);
+                  this.mpApplyDamage(p.id, 20, "hazard_smoke");
+                }
+              } else {
+                // Left the smoke bomb radius: allow re-entry damage
+                sb.enteredPlayers.delete(p.id);
+              }
+            }
+            if (sb.duration <= 0) {
+              st.hazards.smokeBombs.splice(i, 1);
             }
           }
         }
       }
 
-      // Remove collected pickups
-      if (collected.size > 0) {
-        st.pickups = st.pickups.filter(pk => !collected.has(pk.id));
+      // ── 4. Environmental Hazards: Toxic Gas (Phases 2 & 3 only) ──
+      // GDD exact: activates at 70 pts, spawns every 5s, lasts 10s, deals 10 HP every 0.5s. Stops at 200 pts.
+      if (st.currentPhase === 2 || st.currentPhase === 3) {
+        st.hazardTimers.gas = (st.hazardTimers.gas || 0) + dt;
+        const GAS_SPAWN_INTERVAL = 5.0; // GDD exact: every 5.0s
+        const GAS_MAX = 4;              // provisional
+        if (st.hazardTimers.gas >= GAS_SPAWN_INTERVAL) {
+          st.hazardTimers.gas = 0;
+          if (st.hazards.toxicGas.length < GAS_MAX) {
+            st.hazards.toxicGas.push({
+              id: "tg_" + (st.nextHazardId++),
+              x: 90 + Math.random() * (SCREEN_WIDTH - 180),
+              y: 90 + Math.random() * (SCREEN_HEIGHT - 180),
+              radius: 65,      // provisional (Appendix C)
+              duration: 10.0,  // GDD exact: lasts 10s
+              tickTimer: 0.5   // GDD exact: deals 10 HP every 0.5s
+            });
+          }
+        }
+
+        // Update toxic gas clouds
+        for (let i = st.hazards.toxicGas.length - 1; i >= 0; i--) {
+          const tg = st.hazards.toxicGas[i];
+          tg.duration -= dt;
+          tg.tickTimer -= dt;
+          if (tg.tickTimer <= 0) {
+            tg.tickTimer = 0.5;
+            for (const p of st.players.values()) {
+              if (!p.isAlive || p.isSpectator) continue;
+              const pcx = p.x + PLAYER_SIZE / 2;
+              const pcy = p.y + PLAYER_SIZE / 2;
+              const dist = Math.hypot(pcx - tg.x, pcy - tg.y);
+              if (dist <= tg.radius + PLAYER_SIZE / 2) {
+                this.mpApplyDamage(p.id, 10, "hazard_toxic_gas");
+              }
+            }
+          }
+          if (tg.duration <= 0) {
+            st.hazards.toxicGas.splice(i, 1);
+          }
+        }
+      } else {
+        // Toxic gas not active in phases < 2 or >= 4
+        if (st.hazards.toxicGas.length > 0) st.hazards.toxicGas = [];
+      }
+
+      // ── 5. Environmental Hazards: Laser Wall (Phase 3 only) ──
+      // GDD exact: activates at 120 pts, cycle every 15s, deals 60 HP on direct hit. Stops at 200 pts.
+      if (st.currentPhase === 3) {
+        st.hazardTimers.laser = (st.hazardTimers.laser || 0) + dt;
+        const LASER_CYCLE = 15.0; // GDD exact: activates every 15s
+        if (st.hazardTimers.laser >= LASER_CYCLE && !st.hazards.laserWall) {
+          st.hazardTimers.laser = 0;
+          st.hazards.laserWall = {
+            id: "lw_" + (st.nextHazardId++),
+            x: -20,
+            width: 16,               // provisional (Appendix C)
+            speed: (840 / 3.5),      // provisional: 3.5s sweep across 800px arena
+            active: true,
+            hitPlayers: new Set()
+          };
+          this.floatingTexts.push(new FloatingText(SCREEN_WIDTH / 2, 50, "⚡ LASER WALL SWEEP!", "#ff0055"));
+        }
+
+        if (st.hazards.laserWall && st.hazards.laserWall.active) {
+          const lw = st.hazards.laserWall;
+          lw.x += lw.speed * dt;
+          for (const p of st.players.values()) {
+            if (!p.isAlive || p.isSpectator) continue;
+            const px = p.x + PLAYER_SIZE / 2;
+            if (Math.abs(px - lw.x) <= (lw.width / 2 + PLAYER_SIZE / 2)) {
+              if (!lw.hitPlayers.has(p.id)) {
+                lw.hitPlayers.add(p.id);
+                this.mpApplyDamage(p.id, 60, "hazard_laser"); // GDD exact: 60 HP direct hit
+              }
+            }
+          }
+          if (lw.x > SCREEN_WIDTH + lw.width + 20) {
+            st.hazards.laserWall = null;
+          }
+        }
+      } else {
+        // Laser wall not active in phases !== 3
+        if (st.hazards.laserWall) st.hazards.laserWall = null;
       }
     }
 
@@ -5303,7 +5553,9 @@
       const spawnInterval = Math.max(1.8, 4.5 - alivePlayerCount * 0.35);
 
       this.mpState.directorTimer = (this.mpState.directorTimer || 0) + dt;
-      if (this.mpState.directorTimer >= spawnInterval && this.mpState.enemies.size < maxEnemies) {
+      // Milestone 5B: Mini enemy spawning stops permanently at 120 points in Elite Mode
+      const haltMiniEnemies = (this.mpState.mode === "ELITE" && (this.mpState.teamScore || 0) >= 120);
+      if (!haltMiniEnemies && this.mpState.directorTimer >= spawnInterval && this.mpState.enemies.size < maxEnemies) {
         this.mpState.directorTimer = 0;
         const archetypes = ["CHASER", "FLANKER", "SNIPER", "BOMBER", "DISRUPTOR"];
         const chosen = archetypes[Math.floor(Math.random() * archetypes.length)];
@@ -6968,6 +7220,94 @@
       }
     }
 
+    // Milestone 5B: Draw Elite Mode environmental hazards (smoke bombs, toxic gas, laser wall)
+    _drawEliteHazards(ctx, hazards) {
+      if (!hazards) return;
+      const t = (this.gameTime || 0);
+
+      // 1. Toxic Gas Clouds (green noxious vapor)
+      if (Array.isArray(hazards.toxicGas)) {
+        for (const tg of hazards.toxicGas) {
+          ctx.save();
+          const rad = tg.radius || 65;
+          const grd = ctx.createRadialGradient(tg.x, tg.y, rad * 0.2, tg.x, tg.y, rad);
+          grd.addColorStop(0, "rgba(100, 240, 50, 0.35)");
+          grd.addColorStop(0.7, "rgba(80, 200, 30, 0.20)");
+          grd.addColorStop(1, "rgba(60, 160, 20, 0)");
+          ctx.fillStyle = grd;
+          ctx.beginPath();
+          ctx.arc(tg.x, tg.y, rad, 0, Math.PI * 2);
+          ctx.fill();
+
+          ctx.strokeStyle = "rgba(120, 255, 60, 0.35)";
+          ctx.lineWidth = 1.5;
+          ctx.stroke();
+          ctx.restore();
+        }
+      }
+
+      // 2. Smoke Bombs (fuse warning or active dense gray smoke)
+      if (Array.isArray(hazards.smokeBombs)) {
+        for (const sb of hazards.smokeBombs) {
+          ctx.save();
+          const rad = sb.radius || 50;
+          if (sb.state === "FUSE") {
+            const blink = Math.sin(t * 12) > 0;
+            ctx.strokeStyle = blink ? "#ff8800" : "rgba(255, 136, 0, 0.3)";
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.arc(sb.x, sb.y, rad, 0, Math.PI * 2);
+            ctx.stroke();
+
+            ctx.fillStyle = "#ffaa00";
+            ctx.beginPath();
+            ctx.arc(sb.x, sb.y, 6, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.fillStyle = "#ffffff";
+            ctx.font = "bold 9px monospace";
+            ctx.textAlign = "center";
+            ctx.textBaseline = "middle";
+            ctx.fillText(Math.max(0, Math.ceil(sb.fuse || 2)), sb.x, sb.y - 12);
+          } else {
+            const grd = ctx.createRadialGradient(sb.x, sb.y, rad * 0.1, sb.x, sb.y, rad);
+            grd.addColorStop(0, "rgba(140, 140, 150, 0.55)");
+            grd.addColorStop(0.6, "rgba(90, 90, 100, 0.35)");
+            grd.addColorStop(1, "rgba(50, 50, 60, 0)");
+            ctx.fillStyle = grd;
+            ctx.beginPath();
+            ctx.arc(sb.x, sb.y, rad, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.strokeStyle = "rgba(160, 160, 170, 0.4)";
+            ctx.lineWidth = 1;
+            ctx.stroke();
+          }
+          ctx.restore();
+        }
+      }
+
+      // 3. Laser Wall (vertical neon crimson barrier)
+      if (hazards.laserWall && hazards.laserWall.active) {
+        ctx.save();
+        const lw = hazards.laserWall;
+        const w = lw.width || 16;
+        const grd = ctx.createLinearGradient(lw.x - w/2, 0, lw.x + w/2, 0);
+        grd.addColorStop(0, "rgba(255, 0, 68, 0.1)");
+        grd.addColorStop(0.5, "rgba(255, 0, 68, 0.95)");
+        grd.addColorStop(1, "rgba(255, 0, 68, 0.1)");
+        ctx.fillStyle = grd;
+        ctx.shadowColor = "#ff0044";
+        ctx.shadowBlur = 18;
+        ctx.fillRect(lw.x - w/2, 0, w, SCREEN_HEIGHT);
+        ctx.strokeStyle = "#ffffff";
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(lw.x, 0);
+        ctx.lineTo(lw.x, SCREEN_HEIGHT);
+        ctx.stroke();
+        ctx.restore();
+      }
+    }
+
     draw() {
       const ctx = this.ctx;
 
@@ -6994,6 +7334,11 @@
       // Milestone 5A: Draw Elite Mode pickups from mpState (host-authoritative array)
       if (isEliteMP && this.mpState && Array.isArray(this.mpState.pickups)) {
         this._drawElitePickups(ctx, this.mpState.pickups);
+      }
+
+      // Milestone 5B: Draw Elite Mode hazards (smoke bombs, toxic gas, laser wall)
+      if (isEliteMP && this.mpState && this.mpState.hazards) {
+        this._drawEliteHazards(ctx, this.mpState.hazards);
       }
 
       // Draw Enemies (normal)
