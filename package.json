@@ -10,7 +10,10 @@
     "node": ">=18.0.0"
   },
   "dependencies": {
-    "peer": "latest",
-    "express": "^4.18.2"
+    "express": "^4.18.2",
+    "peer": "latest"
+  },
+  "devDependencies": {
+    "puppeteer-core": "^25.18.1"
   }
 }

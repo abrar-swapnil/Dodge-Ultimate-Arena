@@ -2255,6 +2255,8 @@
         // Space: Dash
         if (e.code === "Space") {
           e.preventDefault();
+          const localMP = this.mpState?.players?.get(this.peer?.id || (this.isHost ? "host" : "guest"));
+          if (localMP && localMP.freezeTimer > 0) return;
           if (myPlayer.dash()) {
             this.sounds.playDash();
             if (this.mode === "CUSTOM_ROOM" && !this.isHost && this.conn) this.conn.send({ type: "DASH" });
@@ -2510,6 +2512,8 @@
       const handleDash = (e) => {
         if (e.cancelable) e.preventDefault();
         this.sounds._init();
+        const localMP = this.mpState?.players?.get(this.peer?.id || (this.isHost ? "host" : "guest"));
+        if (localMP && localMP.freezeTimer > 0) return;
         const p = getActivePlayer();
         if (p.dash()) {
           this.sounds.playDash();
@@ -4254,9 +4258,19 @@
         btn.textContent = this.lobbyIsReady ? "❌ Unready" : "✅ Ready";
         btn.classList.toggle("active", this.lobbyIsReady);
       }
-      // Notify host via reliable channel
       const myPeerId = this.peer?.id;
       if (!myPeerId) return;
+
+      // Notify host immediately via WebRTC reliable channel
+      for (const [, conn] of this.mpConnections) {
+        if (conn.reliable && conn.reliable.open) {
+          try {
+            conn.reliable.send({ type: "PLAYER_READY", peerId: myPeerId, isReady: this.lobbyIsReady });
+          } catch (e) {}
+        }
+      }
+
+      // Also update Room API on server
       try {
         await fetch(`${this._serverBase()}/api/rooms/ready`, {
           method: "POST",
@@ -4264,12 +4278,6 @@
           body: JSON.stringify({ roomCode: this.lobbyRoomCode, peerId: myPeerId, isReady: this.lobbyIsReady }),
         });
       } catch (e) { /* non-critical */ }
-      // Also notify host via WebRTC for instant update
-      for (const [, conn] of this.mpConnections) {
-        if (conn.reliable && conn.reliable.open) {
-          conn.reliable.send({ type: "PLAYER_READY", peerId: myPeerId, isReady: this.lobbyIsReady });
-        }
-      }
     }
 
     // Host starts the match
@@ -4446,6 +4454,13 @@
         // Unreliable channel (movement snapshots — future use)
         const unreliable = this.peer.connect(hostPeerId, { reliable: false, maxRetransmits: 0, ordered: false, label: "sync" });
 
+        // Listen for host messages on both channels immediately to prevent missed events
+        reliable.on("data", (msg) => this._handleLobbyMessage(msg, hostPeerId));
+        reliable.on("close", () => this._handlePeerDisconnect(hostPeerId));
+        reliable.on("error", () => this._handlePeerDisconnect(hostPeerId));
+        unreliable.on("data", (msg) => this._handleLobbyMessage(msg, hostPeerId));
+        unreliable.on("close", () => this._handlePeerDisconnect(hostPeerId));
+
         await new Promise((resolve, reject) => {
           reliable.on("open", resolve);
           reliable.on("error", reject);
@@ -4475,12 +4490,6 @@
 
         // Also set legacy conn for backward-compat with existing game code
         this.conn = reliable;
-
-        // 4. Listen for host messages on both reliable and unreliable channels
-        reliable.on("data", (msg) => this._handleLobbyMessage(msg, hostPeerId));
-        reliable.on("close", () => this._handlePeerDisconnect(hostPeerId));
-        unreliable.on("data", (msg) => this._handleLobbyMessage(msg, hostPeerId));
-        unreliable.on("close", () => this._handlePeerDisconnect(hostPeerId));
 
         // Announce self to host
         reliable.send({ type: "PLAYER_JOIN", peerId: myPeerId, ...me });
@@ -4523,7 +4532,7 @@
 
         case "PLAYER_READY":
           if (this.isHost) {
-            const player = this.lobbyPlayers.get(msg.peerId);
+            const player = this.lobbyPlayers.get(msg.peerId) || this.lobbyPlayers.get(fromPeerId);
             if (player) player.isReady = msg.isReady;
             this._renderLobbyGrid();
             this._broadcastLobbyState();
@@ -7077,7 +7086,7 @@
     mpHandleInfectionShoot(shooterId, weaponType, sx, sy, fx, fy) {
       if (!this.isHost || !this.mpState || this.mpState.mode !== "INFECTION") return false;
       const shooter = this.mpState.players.get(shooterId);
-      if (!shooter || !shooter.isAlive || shooter.isSpectator || (shooter.suppressedTimer > 0)) return false;
+      if (!shooter || !shooter.isAlive || shooter.isSpectator || (shooter.suppressedTimer > 0) || (shooter.freezeTimer > 0)) return false;
       if (!shooter.infectionWeapon || shooter.infectionWeapon.type !== weaponType) return false;
       if (shooter.infectionWeapon.ammo <= 0 && shooter.infectionWeapon.ammo !== Infinity) return false;
 
@@ -7115,7 +7124,7 @@
       if (this.mode !== "CUSTOM_ROOM" || !this.mpState || this.mpState.mode !== "INFECTION" || this.state !== "PLAYING") return;
       const myId = this.peer ? this.peer.id : (this.isHost ? "host" : "guest");
       const myP = this.mpState.players.get(myId) || (this.isHost ? this.mpState.players.values().next().value : null);
-      if (!myP || !myP.isAlive || myP.isSpectator || (myP.suppressedTimer > 0)) return;
+      if (!myP || !myP.isAlive || myP.isSpectator || (myP.suppressedTimer > 0) || (myP.freezeTimer > 0)) return;
       if (!myP.infectionWeapon) return;
       if (myP.infectionWeapon.ammo <= 0 && myP.infectionWeapon.ammo !== Infinity) return;
       if (myP.infectionWeapon.cooldown > 0) return;
@@ -7159,7 +7168,7 @@
     mpApplyWeaponDamage(targetType, targetId, shooterId, weaponType, explicitEventId) {
       if (!this.isHost || !this.mpState || this.mpState.mode !== "INFECTION") return null;
       const shooter = this.mpState.players.get(shooterId);
-      if (!shooter || !shooter.isAlive || shooter.isSpectator || (shooter.suppressedTimer > 0)) return null;
+      if (!shooter || !shooter.isAlive || shooter.isSpectator || (shooter.suppressedTimer > 0) || (shooter.freezeTimer > 0)) return null;
       if (!shooter.infectionWeapon || shooter.infectionWeapon.type !== weaponType) return null;
       if (shooter.infectionWeapon.ammo <= 0 && shooter.infectionWeapon.ammo !== Infinity) return null;
 
@@ -10103,6 +10112,7 @@
     const canvas = document.getElementById("game-canvas");
     if (!canvas) return;
     const game = new DodgeArenaGame(canvas);
+    window.game = game;
     game.start();
   });
 })();

@@ -427,6 +427,15 @@ console.log("\n── Suite 4: Cosmic Boss Abilities ─────────
 
   assertEqual(pFreezeTarget.freezeType, "WHITE_HOLE", "4k: Player frozen by White Hole");
   assertEqual(pFreezeTarget.freezeTimer, 15.0, "4l: GDD exact: White Hole freezes for 15 seconds");
+
+  // Milestone 6D: Frozen players must not move, dash, or fire
+  pFreezeTarget.infectionWeapon = { type: "ZOMBIE_KILLER", name: "Zombie Killer", ammo: 100, maxAmmo: 150, cooldown: 0 };
+  const shootResult = g.mpHandleInfectionShoot(pFreezeTarget.id, "ZOMBIE_KILLER", pFreezeTarget.x, pFreezeTarget.y, 1, 0);
+  assertEqual(shootResult, false, "4m: Host rejects infection shoot request from frozen player");
+  assertEqual(pFreezeTarget.infectionWeapon.ammo, 100, "4n: Ammo was not consumed by rejected shot");
+
+  const dmgResult = g.mpApplyWeaponDamage("COSMIC_BOSS", "boss_cosmic", pFreezeTarget.id, "ZOMBIE_KILLER");
+  assertEqual(dmgResult, null, "4o: Host rejects weapon damage application from frozen player");
 }
 
 // ─────────────────────────────────────────────────────────────────
