@@ -178,6 +178,36 @@
         }
       }
       this._loadPewAudio();
+
+      // Score ball collect sound buffer & audio pool
+      this.scoreBuffer = null;
+      this.scorePool = [];
+      this.scoreIndex = 0;
+      if (typeof Audio !== "undefined") {
+        for (let i = 0; i < 8; i++) {
+          const a = new Audio("score.mp3");
+          a.preload = "auto";
+          this.scorePool.push(a);
+        }
+      }
+      this._loadScoreAudio();
+    }
+
+    _loadScoreAudio() {
+      if (typeof fetch === "undefined") return;
+      fetch("score.mp3")
+        .then(res => res.arrayBuffer())
+        .then(buf => {
+          this._init();
+          if (this.ctx) {
+            this.ctx.decodeAudioData(buf, (decoded) => {
+              this.scoreBuffer = decoded;
+            }, () => {});
+          } else {
+            this._pendingScoreBuffer = buf;
+          }
+        })
+        .catch(() => {});
     }
 
     _loadPewAudio() {
@@ -206,6 +236,13 @@
           delete this._pendingPewBuffer;
           this.ctx.decodeAudioData(b, (decoded) => {
             this.pewBuffer = decoded;
+          }, () => {});
+        }
+        if (this.ctx && this._pendingScoreBuffer) {
+          const b = this._pendingScoreBuffer;
+          delete this._pendingScoreBuffer;
+          this.ctx.decodeAudioData(b, (decoded) => {
+            this.scoreBuffer = decoded;
           }, () => {});
         }
       }
@@ -267,6 +304,31 @@
     playCollect() {
       if (this.muted) return;
       this._init();
+
+      // 1. Preferred: Web Audio BufferSource for score.mp3 (0ms latency, handles rapid consecutive eats)
+      if (this.ctx && this.scoreBuffer) {
+        try {
+          const src = this.ctx.createBufferSource();
+          src.buffer = this.scoreBuffer;
+          const gain = this.ctx.createGain();
+          gain.gain.value = 0.65;
+          src.connect(gain);
+          gain.connect(this.ctx.destination);
+          src.start(0);
+          return;
+        } catch (_) {}
+      }
+
+      // 2. Fallback: Rotating Audio Pool
+      if (this.scorePool && this.scorePool.length > 0) {
+        const sound = this.scorePool[this.scoreIndex % this.scorePool.length];
+        this.scoreIndex++;
+        sound.currentTime = 0;
+        sound.play().catch(() => {});
+        return;
+      }
+
+      // 3. Fallback synth tone
       if (!this.ctx) return;
       const now = this.ctx.currentTime;
       const osc = this.ctx.createOscillator();
@@ -1622,7 +1684,7 @@
         splashEntered = true;
         if (e && e.cancelable) e.preventDefault(); // stop click firing after pointerdown
         this.sounds._init();
-        this.sounds.playCollect();
+        this.sounds.playTone(520, "sine", 0.12, 0.25);
         splashScreen.classList.add("hidden");
         this.showMenu();
       };
@@ -2013,13 +2075,13 @@
 
       let count = 3;
       countdownNum.innerText = count;
-      this.sounds.playCollect();
+      this.sounds.playTone(587.33, "sine", 0.09, 0.2);
 
       const timerId = setInterval(() => {
         count--;
         if (count > 0) {
           countdownNum.innerText = count;
-          this.sounds.playCollect();
+          this.sounds.playTone(587.33, "sine", 0.09, 0.2);
         } else if (count === 0) {
           countdownNum.innerText = "GO!";
           this.sounds.playDash();
