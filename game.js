@@ -3825,6 +3825,10 @@
       this.enemies = [];
       this.setCautionBanner(false);
       this.updateMaxLevel("SOLO", newLevel);
+      // Refill lives on level advance
+      this.p1.lives = 3;
+      this.updateHUD();
+      this.floatingTexts.push(new FloatingText(this.p1.x, this.p1.y - 20, "❤️❤️❤️ LIVES REFILLED!", "#00ff88"));
     }
 
     // --- SOLO: Fire player bullet ---
@@ -3997,6 +4001,10 @@
       this.enemies = [];
       this.setCautionBanner(false);
       this.updateMaxLevel("SOLO", newLevel);
+      // Refill lives on level advance
+      this.p1.lives = 3;
+      this.updateHUD();
+      this.floatingTexts.push(new FloatingText(this.p1.x, this.p1.y - 20, "❤️❤️❤️ LIVES REFILLED!", "#00ff88"));
     }
 
     firePlayerBullet() {
