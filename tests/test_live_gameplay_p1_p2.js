@@ -546,9 +546,17 @@ async function runTest() {
     }, { timeout: 5000 });
 
     // Host applies weapon damage event of 100 to boss
-    await host2.evaluate((gId) => {
-      window.game.mpApplyWeaponDamage("INFECTED_BOSS", "boss_infected", gId, "ZOMBIE_KILLER");
+    const dmgResult = await host2.evaluate((gId) => {
+      const p = window.game.mpState.players.get(gId);
+      p.isAlive = true;
+      p.isSpectator = false;
+      p.hp = 100;
+      p.infectionWeapon = { type: "ZOMBIE_KILLER", name: "Zombie Killer", ammo: 150, maxAmmo: 150, cooldown: 0 };
+      const res = window.game.mpApplyWeaponDamage("INFECTED_BOSS", "boss_infected", gId, "ZOMBIE_KILLER");
+      const b = window.game.mpState.boss;
+      return { res, pAlive: p?.isAlive, pSpec: p?.isSpectator, pWep: p?.infectionWeapon, bossHp: b?.hp, bossId: b?.id, isHost: window.game.isHost };
     }, guest2PeerId);
+    console.log("  [*] Apply weapon damage debug:", JSON.stringify(dmgResult));
 
     // Wait for boss HP to decrement to 2400 on both
     await host2.waitForFunction(() => window.game.mpState.boss?.hp === 2400, { timeout: 5000 });
