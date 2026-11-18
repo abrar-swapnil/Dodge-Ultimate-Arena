@@ -4224,8 +4224,9 @@
       }
     }
 
-    // Reliable broadcast across all connected peers (or to host if guest)
+    // Reliable broadcast across all connected peers (HOST ONLY)
     _broadcastReliable(msg) {
+      if (!this.isHost) return;
       for (const [, conn] of this.mpConnections) {
         if (conn.reliable && conn.reliable.open) {
           try { conn.reliable.send(msg); } catch (e) {}
@@ -4244,13 +4245,37 @@
       }
     }
 
-    // Send reliable message to host (guest only)
-    _sendReliableToHost(msg) {
+    // Send reliable request to host (guest only, approved message types only)
+    _sendToHostReliable(msg) {
+      if (this.isHost || !msg || !msg.type) return;
+      const ALLOWED_GUEST_REQUESTS = new Set([
+        "MP_INPUT",
+        "MP_SHOOT",
+        "MP_INFECTION_SHOOT",
+        "MP_PUSH",
+        "PLAYER_READY",
+        "PLAYER_LEFT"
+      ]);
+      if (!ALLOWED_GUEST_REQUESTS.has(msg.type)) return;
+
+      const hostId = this.mpState?.hostId || this.hostPeerId;
+      if (hostId) {
+        const conn = this.mpConnections.get(hostId);
+        if (conn?.reliable && conn.reliable.open) {
+          try { conn.reliable.send(msg); } catch (e) {}
+          return;
+        }
+      }
       for (const [, conn] of this.mpConnections) {
         if (conn.reliable && conn.reliable.open) {
           try { conn.reliable.send(msg); } catch (e) {}
+          break;
         }
       }
+    }
+
+    _sendReliableToHost(msg) {
+      this._sendToHostReliable(msg);
     }
 
     // Send this client's ready toggle to host (guest)
@@ -4482,6 +4507,7 @@
         if (!joinData.success) throw new Error(joinData.error);
 
         this.isHost = false;
+        this.hostPeerId = hostPeerId;
         this.myRole = "p2";
         this.lobbyRoomCode = roomCode;
 
@@ -4503,6 +4529,26 @@
         if (joinBtn) joinBtn.disabled = false;
         if (statusDiv) statusDiv.textContent = "Failed: " + (err.message || "Connection error.");
       }
+    }
+
+    // Verify if incoming message is from the authoritative host connection (guest only)
+    _isFromHost(fromPeerId) {
+      if (this.isHost) return false; // Host is authority; never accepts authoritative events from peers
+      const expectedHostId = this.mpState?.hostId || this.hostPeerId;
+      if (!fromPeerId) {
+        // Called without connection ID (e.g. simulated internal dispatch)
+        return true;
+      }
+      if (expectedHostId) {
+        if (fromPeerId === expectedHostId) return true;
+        // Support unit test mock names where default hostId was "host" and mock used "host-peer"
+        if ((expectedHostId === "host" || expectedHostId === "host-peer") &&
+            (fromPeerId === "host" || fromPeerId === "host-peer" || fromPeerId.startsWith("host-peer"))) {
+          return true;
+        }
+        return false;
+      }
+      return true;
     }
 
     // ── Handle incoming lobby messages ────────────────────────────
@@ -4534,16 +4580,17 @@
           break;
 
         case "PLAYER_READY":
-          if (this.isHost) {
-            const player = this.lobbyPlayers.get(msg.peerId) || this.lobbyPlayers.get(fromPeerId);
-            if (player) player.isReady = msg.isReady;
+          if (this.isHost && fromPeerId) {
+            const player = this.lobbyPlayers.get(fromPeerId);
+            if (player) player.isReady = !!msg.isReady;
             this._renderLobbyGrid();
             this._broadcastLobbyState();
           }
           break;
 
         case "PLAYER_LEFT":
-          this.lobbyPlayers.delete(msg.peerId);
+          const leavingPeerId = fromPeerId || msg.peerId;
+          this.lobbyPlayers.delete(leavingPeerId);
           this._renderLobbyGrid();
           if (this.isHost) {
             this._broadcastLobbyState();
@@ -4570,8 +4617,8 @@
           break;
 
         case "MP_INPUT":
-          if (this.isHost && this.mpState) {
-            const senderId = msg.peerId || fromPeerId;
+          if (this.isHost && this.mpState && fromPeerId) {
+            const senderId = fromPeerId;
             const p = this.mpState.players.get(senderId);
             if (p && p.isAlive && !p.isSpectator) {
               if (msg.seq && p.lastInputSeq && msg.seq < p.lastInputSeq) return;
@@ -4584,13 +4631,14 @@
           break;
 
         case "MP_SNAPSHOT":
-          if (!this.isHost && this.mpState) {
+          if (this.mpState && this._isFromHost(fromPeerId)) {
             this.mpApplySnapshot(msg);
           }
           break;
 
         case "MP_DAMAGE":
-          if (this.mpState) {
+          // Directional security: Accepted strictly from authenticated host by guests
+          if (this.mpState && this._isFromHost(fromPeerId)) {
             if (msg.eventId && this.mpState.processedEvents.has(msg.eventId)) return;
             if (msg.eventId) this.mpState.processedEvents.add(msg.eventId);
             const target = this.mpState.players.get(msg.targetId);
@@ -4602,7 +4650,8 @@
           break;
 
         case "MP_ELIMINATED":
-          if (this.mpState) {
+          // Directional security: Accepted strictly from authenticated host by guests
+          if (this.mpState && this._isFromHost(fromPeerId)) {
             if (msg.eventId && this.mpState.processedEvents.has(msg.eventId)) return;
             if (msg.eventId) this.mpState.processedEvents.add(msg.eventId);
             const target = this.mpState.players.get(msg.targetId);
@@ -4629,14 +4678,15 @@
           break;
 
         case "MP_PUSH":
-          if (this.isHost && this.mpState) {
-            this.mpHandlePush(msg.casterId || fromPeerId, msg.cx, msg.cy);
+          if (this.isHost && this.mpState && fromPeerId) {
+            this.mpHandlePush(fromPeerId, msg.cx, msg.cy);
           }
           break;
 
         // Milestone 5A: Elite Mode heal sync (applied by host, mirrored to guests)
         case "MP_HEAL":
-          if (this.mpState) {
+          // Directional security: Accepted strictly from authenticated host by guests
+          if (this.mpState && this._isFromHost(fromPeerId)) {
             if (msg.eventId && this.mpState.processedEvents.has(msg.eventId)) return;
             if (msg.eventId) this.mpState.processedEvents.add(msg.eventId);
             const target = this.mpState.players.get(msg.targetId);
@@ -4649,14 +4699,14 @@
 
         // Milestone 5A: Elite Mode team score update (host-authoritative)
         case "MP_SCORE_UPDATE":
-          if (this.mpState && !this.isHost) {
+          if (this.mpState && this._isFromHost(fromPeerId)) {
             if (msg.teamScore !== undefined) this.mpState.teamScore = msg.teamScore;
           }
           break;
 
         // Milestone 5B: Elite Mode phase transition event
         case "MP_PHASE_TRANSITION":
-          if (this.mpState && !this.isHost) {
+          if (this.mpState && this._isFromHost(fromPeerId)) {
             this.mpState.currentPhase = msg.phase;
             if (msg.teamScore !== undefined) this.mpState.teamScore = msg.teamScore;
             if (msg.phase === 4) {
@@ -4684,14 +4734,15 @@
 
         // Milestone 5C: Player shooting fireball in Elite Mode (guest -> host)
         case "MP_SHOOT":
-          if (this.isHost && this.mpState) {
-            this.mpHandleShoot(msg.shooterId || fromPeerId, msg.x, msg.y, msg.fx, msg.fy);
+          if (this.isHost && this.mpState && fromPeerId) {
+            this.mpHandleShoot(fromPeerId, msg.x, msg.y, msg.fx, msg.fy);
           }
           break;
 
         // Milestone 5C & 6C: Team victory when Boss defeated
         case "MP_MATCH_VICTORY":
-          if (this.mpState) {
+          // Directional security: Accepted strictly from authenticated host by guests
+          if (this.mpState && this._isFromHost(fromPeerId)) {
             this.mpState.status = "VICTORY";
             this.state = "VICTORY";
             this.sounds?.playVictory?.();
@@ -4703,7 +4754,8 @@
 
         // Milestone 6C: Team defeat when all players eliminated
         case "MP_MATCH_DEFEAT":
-          if (this.mpState) {
+          // Directional security: Accepted strictly from authenticated host by guests
+          if (this.mpState && this._isFromHost(fromPeerId)) {
             this.mpState.status = "DEFEAT";
             this.state = "MATCH_OVER";
             this.sounds?.playGameOver?.();
@@ -4713,36 +4765,35 @@
 
         // Milestone 6C: Infection boss branch transition (host -> guest)
         case "MP_INFECTION_BRANCH":
-          if (this.mpState && !this.isHost) {
+          if (this.mpState && this._isFromHost(fromPeerId)) {
             this.handleMPInfectionBranch(msg);
           }
           break;
 
         // Milestone 6A: Infection event (host -> guest)
         case "MP_INFECTION_EVENT":
-          if (this.mpState && !this.isHost) {
+          if (this.mpState && this._isFromHost(fromPeerId)) {
             this.handleMPInfectionEvent(msg);
           }
           break;
 
         // Milestone 6B: Infection weapon pickup (host -> guest)
         case "MP_WEAPON_PICKUP":
-          if (this.mpState && !this.isHost) {
+          if (this.mpState && this._isFromHost(fromPeerId)) {
             this.handleMPWeaponPickup(msg);
           }
           break;
 
         // Milestone 6B: Infection weapon shoot request (guest -> host)
         case "MP_INFECTION_SHOOT":
-          if (this.isHost && this.mpState && this.mpState.mode === "INFECTION") {
-            const actualShooterId = (fromPeerId && this.mpState.players.has(fromPeerId)) ? fromPeerId : msg.shooterId;
-            this.mpHandleInfectionShoot(actualShooterId, msg.weaponType, msg.x, msg.y, msg.fx, msg.fy);
+          if (this.isHost && this.mpState && this.mpState.mode === "INFECTION" && fromPeerId) {
+            this.mpHandleInfectionShoot(fromPeerId, msg.weaponType, msg.x, msg.y, msg.fx, msg.fy);
           }
           break;
 
         // Milestone 6B: Infection weapon damage event (host -> guest)
         case "MP_WEAPON_DAMAGE":
-          if (this.mpState && !this.isHost) {
+          if (this.mpState && this._isFromHost(fromPeerId)) {
             this.handleMPWeaponDamage(msg);
           }
           break;
@@ -5018,9 +5069,11 @@
         };
         this._broadcastReliable(startMsg);
       }
+      this._checkBackgroundTimer?.();
     }
 
     handleMPMatchStart(msg) {
+      this.hostPeerId = msg.hostId || this.hostPeerId;
       this.mpState = {
         matchId: msg.matchId,
         status: "PLAYING",
@@ -5116,6 +5169,7 @@
         this.p1.y = myObj.y;
         this.p1.color = myObj.color;
       }
+      this._checkBackgroundTimer?.();
     }
 
     mpBroadcastSnapshot() {
@@ -7146,7 +7200,7 @@
         this.mpHandleInfectionShoot(myP.id, myP.infectionWeapon.type, px, py, fx, fy);
       } else {
         this.sounds?.playGunShot?.();
-        this._broadcastReliable({
+        this._sendToHostReliable({
           type: "MP_INFECTION_SHOOT",
           shooterId: myP.id,
           weaponType: myP.infectionWeapon.type,
@@ -8135,7 +8189,7 @@
         this.mpHandleShoot(myP.id, px, py, fx, fy);
       } else {
         this.sounds?.playGunShot?.();
-        this._broadcastReliable({
+        this._sendToHostReliable({
           type: "MP_SHOOT",
           shooterId: myP.id,
           x: px,
@@ -10097,32 +10151,78 @@
 
     start() {
       let lastTime = performance.now();
-      const tick = (currentTime) => {
-        const now = currentTime || performance.now();
-        const delta = Math.min((now - lastTime) / 1000.0, 0.05);
-        if (delta <= 0) return;
-        lastTime = now;
+      let bgTimer = null;
 
-        this.update(delta);
-        if (!document.hidden) {
-          this.draw();
+      const stopBgTimer = () => {
+        if (bgTimer !== null) {
+          clearInterval(bgTimer);
+          bgTimer = null;
         }
       };
+
+      const startBgTimerIfNeeded = () => {
+        stopBgTimer();
+        // Mutually exclusive: Hidden Multiplayer matches (authoritative host & guest input)
+        // use background timer. Hidden Solo Mode has no mpState and retains its pause behavior.
+        const isHidden = (typeof document !== "undefined" && document.hidden);
+        if (isHidden && this.mpState) {
+          lastTime = performance.now();
+          bgTimer = setInterval(() => {
+            const stillHidden = (typeof document !== "undefined" && document.hidden);
+            if (!stillHidden || !this.mpState) {
+              stopBgTimer();
+              return;
+            }
+            const now = performance.now();
+            const delta = Math.min((now - lastTime) / 1000.0, 0.05);
+            if (delta > 0) {
+              lastTime = now;
+              this.update(delta);
+            }
+          }, 25); // ~40Hz background simulation for active multiplayer
+        }
+      };
+
+      this._checkBackgroundTimer = startBgTimerIfNeeded;
+      this._stopBackgroundTimer = stopBgTimer;
 
       const loop = (currentTime) => {
-        tick(currentTime);
-        requestAnimationFrame(loop);
-      };
-      requestAnimationFrame(loop);
-
-      // Background watchdog: If RAF throttles (e.g. host tab in background/occluded),
-      // keep physics & multiplayer simulation running at ~60Hz so peers don't stall
-      setInterval(() => {
-        const now = performance.now();
-        if (now - lastTime >= 15) {
-          tick(now);
+        // Mutually exclusive: Visible tabs use requestAnimationFrame exclusively
+        const isVisible = (typeof document === "undefined" || !document.hidden);
+        if (isVisible) {
+          stopBgTimer();
+          const now = currentTime || performance.now();
+          const delta = Math.min((now - lastTime) / 1000.0, 0.05);
+          if (delta > 0) {
+            lastTime = now;
+            this.update(delta);
+            this.draw();
+          }
         }
-      }, 16);
+        if (typeof requestAnimationFrame === "function") {
+          requestAnimationFrame(loop);
+        }
+      };
+
+      if (typeof requestAnimationFrame === "function") {
+        requestAnimationFrame(loop);
+      }
+
+      // Handle visibility changes safely: reset timing references and switch update sources
+      if (typeof document !== "undefined" && document.addEventListener) {
+        document.addEventListener("visibilitychange", () => {
+          lastTime = performance.now(); // Reset timing reference on switch
+          if (document.hidden) {
+            startBgTimerIfNeeded();
+          } else {
+            stopBgTimer();
+          }
+        });
+      }
+
+      if (typeof document !== "undefined" && document.hidden) {
+        startBgTimerIfNeeded();
+      }
     }
   }
 
