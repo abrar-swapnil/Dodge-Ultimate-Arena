@@ -286,11 +286,12 @@
           <div class="online-options">
             <div class="online-box">
               <h5>Host Custom Room</h5>
-              <p>Create a room code and invite your friend.</p>
+              <p>Create a room code and invite up to 7 friends.</p>
               <button id="btn-create-room" class="btn primary-btn">Create Room</button>
+              <div id="host-status" class="status-msg"></div>
               <div id="room-code-display" class="hidden">
                 <span class="code-label">Room Code:</span>
-                <span id="created-room-code" class="code-badge">----</span>
+                <span id="created-room-code" class="code-badge">------</span>
                 <button id="btn-copy-link" class="btn small-btn">Copy Invite Link</button>
                 <div class="pulse-loader">Waiting for friend to join...</div>
               </div>
@@ -300,9 +301,9 @@
 
             <div class="online-box">
               <h5>Join Custom Room</h5>
-              <p>Enter the 4-digit room code.</p>
+              <p>Enter the 6-character room code.</p>
               <div class="input-group">
-                <input type="text" id="join-room-input" maxlength="6" placeholder="e.g. 7482" autocomplete="off">
+                <input type="text" id="join-room-input" maxlength="6" placeholder="e.g. 36NDN6" autocomplete="off">
                 <button id="btn-join-room" class="btn secondary-btn">Join</button>
               </div>
               <div id="join-status" class="status-msg"></div>

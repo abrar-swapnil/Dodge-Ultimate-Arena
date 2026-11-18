@@ -1764,10 +1764,10 @@
       this.minigunBullets = [];    // L5 minigun
       this.minigunCooldown = 0;
       this.soloWon = false;
-      this.bulletImg = new Image();
-      this.bulletImg.src = "bullet.png";
-      this.ak47Img = new Image();
-      this.ak47Img.src = "ak47.png";
+      this.bulletImg = (typeof Image !== 'undefined') ? new Image() : null;
+      if (this.bulletImg) this.bulletImg.src = "bullet.png";
+      this.ak47Img = (typeof Image !== 'undefined') ? new Image() : null;
+      if (this.ak47Img) this.ak47Img.src = "ak47.png";
 
       // Entities
       this.enemies = [];
@@ -2125,9 +2125,15 @@
 
       // Host / Join — wired to new 8-player lobby system
       document.getElementById("btn-create-room")?.addEventListener("click", () => this.lobbyCreate());
+      const joinInput = document.getElementById("join-room-input");
       document.getElementById("btn-join-room")?.addEventListener("click", () => {
-        const input = document.getElementById("join-room-input");
-        if (input && input.value.trim()) this.lobbyJoin(input.value.trim().toUpperCase());
+        if (joinInput && joinInput.value.trim()) this.lobbyJoin(joinInput.value.trim().toUpperCase());
+      });
+      joinInput?.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          if (joinInput.value.trim()) this.lobbyJoin(joinInput.value.trim().toUpperCase());
+        }
       });
       document.getElementById("btn-copy-link")?.addEventListener("click", () => {
         const code = document.getElementById("created-room-code")?.innerText;
@@ -2312,7 +2318,13 @@
         }
 
         if (e.code === "Enter") {
-          if (this.state === "MATCH_OVER") this.startMatch(this.mode);
+          if (this.state === "MATCH_OVER" || this.state === "VICTORY") {
+            if (this.mode === "CUSTOM_ROOM" && this.mpState) {
+              this._lobbyLeave();
+            } else {
+              this.startMatch(this.mode);
+            }
+          }
         }
 
         // P or Escape: Pause / Resume
@@ -2585,10 +2597,16 @@
         else if (this.mode === "CUSTOM_ROOM" && this.mpState && this.state === "PLAYING") this.fireMultiplayerWeapon();
       });
 
-      // Canvas click to restart
+      // Canvas click to restart or return to lobby
       this.canvas.addEventListener("click", () => {
         this.sounds._init();
-        if (this.state === "MATCH_OVER") this.startMatch(this.mode);
+        if (this.state === "MATCH_OVER" || this.state === "VICTORY") {
+          if (this.mode === "CUSTOM_ROOM" && this.mpState) {
+            this._lobbyLeave();
+          } else {
+            this.startMatch(this.mode);
+          }
+        }
       });
 
       // === Left mouse hold / Alt hold → continuous gun fire (Solo) ===
@@ -2686,14 +2704,14 @@
         this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
         // Ensure brand text is compact on mobile / landscape across all browsers & iOS
-        const brandSub = document.querySelector(".brand-sub");
+        const brandSub = (typeof document !== "undefined" && document.querySelector) ? document.querySelector(".brand-sub") : null;
         if (brandSub) {
           const isCompact = window.innerWidth <= 768 || window.innerHeight <= 550 || (window.innerWidth <= 950 && window.innerHeight < window.innerWidth);
           brandSub.style.display = isCompact ? "none" : "";
         }
 
         // Re-apply saved HUD layout on screen resize / orientation so buttons adapt gracefully
-        if (!document.body.classList.contains("hud-editing")) {
+        if (document.body && document.body.classList && !document.body.classList.contains("hud-editing")) {
           const savedHud = localStorage.getItem("dodgearena_hud_layout");
           if (savedHud) {
             try { this.applyHudLayout(JSON.parse(savedHud)); } catch (_) {}
@@ -2715,7 +2733,7 @@
       if (savedCreds && savedPhoto) {
         this.setPlayerPhoto(savedPhoto, false);
       } else {
-        localStorage.removeItem("dodgearena_char_photo");
+        localStorage?.removeItem?.("dodgearena_char_photo");
         this.setPlayerShape(savedShape, false);
       }
 
@@ -2856,9 +2874,9 @@
 
       // Logout button
       document.getElementById("btn-logout-account")?.addEventListener("click", () => {
-        localStorage.removeItem("dodgearena_gamer_credentials");
-        localStorage.removeItem("dodgearena_gamer_profile");
-        localStorage.removeItem("dodgearena_char_photo");
+        localStorage?.removeItem?.("dodgearena_gamer_credentials");
+        localStorage?.removeItem?.("dodgearena_gamer_profile");
+        localStorage?.removeItem?.("dodgearena_char_photo");
         this.gamerProfile = null;
         if (this.p1) this.p1.name = "Player 1";
         this.setPlayerShape("square", true);
@@ -3186,7 +3204,7 @@
         this.setPlayerPhoto(profile.photo, false);
       } else {
         // Account has no custom photo: clear any previous user's photo completely
-        localStorage.removeItem("dodgearena_char_photo");
+        localStorage?.removeItem?.("dodgearena_char_photo");
         this.setPlayerShape(profile.shape || "square", false);
       }
 
@@ -3636,7 +3654,7 @@
     }
 
     resetHudLayout() {
-      localStorage.removeItem("dodgearena_hud_layout");
+      localStorage?.removeItem?.("dodgearena_hud_layout");
       const ids = ["joystick-zone", "sprint-btn", "dash-btn", "push-btn", "emer-dodge-btn", "beam-btn", "gun-btn"];
       ids.forEach((id) => {
         const el = document.getElementById(id);
@@ -3679,7 +3697,7 @@
       myPlayer.avatarImg = null;
       myPlayer.avatarDataUrl = null;
 
-      localStorage.removeItem("dodgearena_char_photo");
+      localStorage?.removeItem?.("dodgearena_char_photo");
       if (persist) {
         localStorage.setItem("dodgearena_char_shape", shape);
       }
@@ -3751,7 +3769,7 @@
     }
 
     removePlayerPhoto() {
-      localStorage.removeItem("dodgearena_char_photo");
+      localStorage?.removeItem?.("dodgearena_char_photo");
       if (this.gamerProfile) {
         this.gamerProfile.photo = null;
         localStorage.setItem("dodgearena_gamer_profile", JSON.stringify(this.gamerProfile));
@@ -4201,8 +4219,20 @@
       const startBtn = document.getElementById("btn-lobby-start");
       if (startBtn && this.isHost) {
         const guests = players.filter(p => !p.isHost);
+        const readyGuests = guests.filter(p => p.isReady);
         const allReady = guests.length > 0 && guests.every(p => p.isReady);
         startBtn.disabled = !allReady;
+
+        if (guests.length === 0) {
+          startBtn.textContent = "▶ Start Match";
+          this._setLobbyStatus(`<span class="lobby-spinner"></span> Waiting for players to join… Room: ${this.lobbyRoomCode || "------"}`, "info");
+        } else if (!allReady) {
+          startBtn.textContent = `▶ Start Match (${readyGuests.length}/${guests.length} Ready)`;
+          this._setLobbyStatus(`⏳ Waiting for all players to ready (${readyGuests.length}/${guests.length} ready)…`, "info");
+        } else {
+          startBtn.textContent = `▶ Start Match (${players.length} Ready)`;
+          this._setLobbyStatus(`✅ All players ready! Host can start the match.`, "success");
+        }
       }
     }
 
@@ -4294,7 +4324,8 @@
       this.lobbyIsReady = !this.lobbyIsReady;
       const btn = document.getElementById("btn-lobby-ready");
       if (btn) {
-        btn.textContent = this.lobbyIsReady ? "❌ Unready" : "✅ Ready";
+        btn.textContent = this.lobbyIsReady ? "⏳ Cancel Ready" : "✅ Ready";
+        btn.classList.toggle("is-ready", this.lobbyIsReady);
         btn.classList.toggle("active", this.lobbyIsReady);
       }
       const myPeerId = this.peer?.id;
@@ -4378,15 +4409,40 @@
       this.lobbyPlayers.clear();
       this.lobbyIsReady = false;
       this.isHost = false;
+      this._isCreatingRoom = false;
+      this._isJoiningRoom = false;
+
+      const createBtn = document.getElementById("btn-create-room");
+      if (createBtn) { createBtn.disabled = false; createBtn.textContent = "Create Room"; }
+      const hostStatus = document.getElementById("host-status");
+      if (hostStatus) { hostStatus.textContent = ""; hostStatus.className = "status-msg"; }
+      const joinBtn = document.getElementById("btn-join-room");
+      if (joinBtn) { joinBtn.disabled = false; joinBtn.textContent = "Join"; }
+      const joinInput = document.getElementById("join-room-input");
+      if (joinInput) { joinInput.disabled = false; }
+      const joinStatus = document.getElementById("join-status");
+      if (joinStatus) { joinStatus.textContent = ""; joinStatus.className = "status-msg"; }
+
       document.getElementById("lobby-overlay")?.classList.add("hidden");
       this.showMenu();
     }
 
     // ── HOST: Create Room ──────────────────────────────────────────
     async lobbyCreate() {
+      if (this._isCreatingRoom) return;
+      this._isCreatingRoom = true;
+
       const statusBox = document.getElementById("room-code-display");
+      const hostStatus = document.getElementById("host-status");
       const createBtn = document.getElementById("btn-create-room");
-      if (createBtn) { createBtn.disabled = true; createBtn.textContent = "⏳ Creating..."; }
+      if (createBtn) {
+        createBtn.disabled = true;
+        createBtn.innerHTML = '<span class="lobby-spinner"></span> Creating Room...';
+      }
+      if (hostStatus) {
+        hostStatus.className = "status-msg loading";
+        hostStatus.textContent = "Connecting to signaling server…";
+      }
 
       const me = this._myPlayerData();
       let roomCode, hostPeerId;
@@ -4409,10 +4465,22 @@
         if (!data.success) throw new Error(data.error);
         roomCode = data.roomCode;
       } catch (err) {
+        this._isCreatingRoom = false;
         if (createBtn) { createBtn.disabled = false; createBtn.textContent = "Create Room"; }
+        const errMsg = "❌ Failed to create room: " + (err.message || "Network error");
+        if (hostStatus) {
+          hostStatus.className = "status-msg error";
+          hostStatus.textContent = errMsg;
+        }
         const statusMsg = document.getElementById("join-status");
-        if (statusMsg) statusMsg.textContent = "Failed to create room: " + (err.message || "Network error");
+        if (statusMsg && !hostStatus) statusMsg.textContent = errMsg;
         return;
+      }
+
+      this._isCreatingRoom = false;
+      if (hostStatus) {
+        hostStatus.className = "status-msg success";
+        hostStatus.textContent = "✅ Room created successfully!";
       }
 
       this.isHost = true;
@@ -4625,16 +4693,31 @@
 
     // ── GUEST: Join Room ───────────────────────────────────────────
     async lobbyJoin(roomCode) {
+      if (!roomCode || typeof roomCode !== "string") return;
+      const cleanCode = roomCode.trim().toUpperCase();
+      if (!cleanCode) return;
+
+      if (this._isJoiningRoom) return;
+      this._isJoiningRoom = true;
+
       const joinBtn = document.getElementById("btn-join-room");
+      const joinInput = document.getElementById("join-room-input");
       const statusDiv = document.getElementById("join-status");
-      if (joinBtn) { joinBtn.disabled = true; }
-      if (statusDiv) statusDiv.textContent = "Connecting…";
+      if (joinBtn) {
+        joinBtn.disabled = true;
+        joinBtn.innerHTML = '<span class="lobby-spinner"></span> Joining...';
+      }
+      if (joinInput) joinInput.disabled = true;
+      if (statusDiv) {
+        statusDiv.className = "status-msg loading";
+        statusDiv.textContent = `Connecting to room ${cleanCode}…`;
+      }
 
       const me = this._myPlayerData();
 
       try {
         // 1. Validate room on server
-        const checkRes = await fetch(`${this._serverBase()}/api/rooms/${roomCode}`);
+        const checkRes = await fetch(`${this._serverBase()}/api/rooms/${cleanCode}`);
         const checkData = await checkRes.json();
         if (!checkData.success) throw new Error(checkData.error || "Room not found.");
         if (checkData.status !== "LOBBY") throw new Error("Match already in progress.");
@@ -4971,9 +5054,14 @@
           // Directional security: Accepted strictly from authenticated host by guests
           if (this.mpState && this._isFromHost(fromPeerId)) {
             this.mpState.status = "DEFEAT";
+            this.mpDefeatReason = msg.reason || "ALL_PLAYERS_ELIMINATED";
             this.state = "MATCH_OVER";
             this.sounds?.playGameOver?.();
-            this.showAnnouncement("💀 TEAM WIPEOUT", "ALL PLAYERS ELIMINATED!");
+            if (msg.reason === "QUARANTINE_BREACHED") {
+              this.showAnnouncement("☣️ QUARANTINE BREACHED", "ALL SQUAD MEMBERS INFECTED AT 60s");
+            } else {
+              this.showAnnouncement("💀 TEAM WIPEOUT", "ALL PLAYERS ELIMINATED!");
+            }
           }
           break;
 
@@ -5064,6 +5152,9 @@
             const p = this.mpState.players.get(msg.peerId);
             if (p) {
               p.disconnected = true;
+              const now = (typeof performance !== "undefined" && performance.now) ? performance.now() : Date.now();
+              p.disconnectedAt = now;
+              p.disconnectDeadline = now + (msg.reconnectWindow || 5000.0);
             }
             this.floatingTexts.push(new FloatingText(SCREEN_WIDTH / 2, 80, `⚠️ ${msg.name || "A player"} connection lost...`, "#f59e0b"));
           }
@@ -5074,6 +5165,7 @@
             const p = this.mpState.players.get(msg.peerId);
             if (p) {
               p.disconnected = false;
+              p.disconnectDeadline = null;
             }
             this.floatingTexts.push(new FloatingText(SCREEN_WIDTH / 2, 80, `⚡ ${msg.name || "A player"} reconnected!`, "#00ff88"));
           }
@@ -6601,6 +6693,7 @@
         }
         if (!anyAlive) {
           this.mpState.status = "DEFEAT";
+          this.mpDefeatReason = "ALL_PLAYERS_ELIMINATED";
           this.state = "MATCH_OVER";
           this._broadcastReliable({
             type: "MP_MATCH_DEFEAT",
@@ -7662,6 +7755,7 @@
       const livingActivePlayers = Array.from(st.players.values()).filter(p => p.isAlive && !p.isSpectator);
       if (livingActivePlayers.length === 0) {
         st.status = "DEFEAT";
+        this.mpDefeatReason = "ALL_PLAYERS_ELIMINATED";
         this.state = "MATCH_OVER";
         this._broadcastReliable({
           type: "MP_MATCH_DEFEAT",
@@ -7789,6 +7883,7 @@
           } else {
             // Exactly or after 60.000s -> Team Defeat (Quarantine Breached)!
             st.status = "DEFEAT";
+            this.mpDefeatReason = "QUARANTINE_BREACHED";
             this.state = "MATCH_OVER";
             this._broadcastReliable({
               type: "MP_MATCH_DEFEAT",
@@ -8918,6 +9013,36 @@
           ctx.fillText(`❄️ FROZEN (${Math.ceil(p.freezeTimer)}s)`, cx, barY - 14);
         }
 
+        // Visual Reconnecting indicator if temporarily disconnected (M7 Phase 3)
+        if (p.disconnected) {
+          const now = (typeof performance !== "undefined" && performance.now) ? performance.now() : Date.now();
+          const remainingSec = Math.max(0, ((p.disconnectDeadline || (now + 5000)) - now) / 1000.0);
+          const pulse = 0.5 + Math.sin(this.gameTime * 6) * 0.4;
+          ctx.strokeStyle = `rgba(245, 158, 11, ${pulse})`;
+          ctx.lineWidth = 2.5;
+          ctx.beginPath();
+          ctx.arc(cx, cy, PLAYER_SIZE / 2 + 5, 0, Math.PI * 2);
+          ctx.stroke();
+
+          ctx.fillStyle = "rgba(15, 23, 42, 0.85)";
+          ctx.strokeStyle = "#f59e0b";
+          ctx.lineWidth = 1;
+          const badgeW = 114, badgeH = 14;
+          const badgeX = cx - badgeW / 2;
+          const badgeY = (p.isInfected || p.freezeTimer > 0) ? (barY - 26) : (barY - 18);
+          if (typeof ctx.roundRect === "function") {
+            ctx.roundRect(badgeX, badgeY, badgeW, badgeH, 3);
+          } else {
+            ctx.rect(badgeX, badgeY, badgeW, badgeH);
+          }
+          ctx.fill();
+          ctx.stroke();
+          ctx.fillStyle = "#fbbf24";
+          ctx.font = "bold 9px monospace, sans-serif";
+          ctx.textAlign = "center";
+          ctx.fillText(`⚠️ RECONNECTING ${remainingSec.toFixed(1)}s`, cx, badgeY + 10);
+        }
+
         ctx.restore();
       }
 
@@ -8961,6 +9086,116 @@
         ctx.fillText("💀 SPECTATOR MODE — YOU ARE ELIMINATED", SCREEN_WIDTH / 2, bY + 20);
         ctx.restore();
       }
+    }
+
+    drawMPSquadRoster(ctx) {
+      if (this.mode !== "CUSTOM_ROOM" || !this.mpState || !this.mpState.players) return;
+      if (this.mpState.status !== "PLAYING" && this.mpState.status !== "VICTORY") return;
+
+      const players = Array.from(this.mpState.players.values());
+      const pCount = players.length;
+      if (pCount === 0) return;
+
+      ctx.save();
+
+      // Top-right compact roster widget
+      const rowH = 15;
+      const headerH = 18;
+      const padding = 6;
+      const rosterW = 150;
+      const rosterH = headerH + pCount * rowH + padding;
+      const rosterX = SCREEN_WIDTH - rosterW - 10;
+      const rosterY = 8;
+
+      // Card backdrop with subtle neon border
+      ctx.fillStyle = "rgba(7, 18, 26, 0.78)";
+      ctx.strokeStyle = "rgba(94, 234, 212, 0.3)";
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      if (typeof ctx.roundRect === "function") {
+        ctx.roundRect(rosterX, rosterY, rosterW, rosterH, 6);
+      } else {
+        ctx.rect(rosterX, rosterY, rosterW, rosterH);
+      }
+      ctx.fill();
+      ctx.stroke();
+
+      // Header: SQUAD ROSTER (N)
+      ctx.textAlign = "left";
+      ctx.font = "bold 9px monospace, sans-serif";
+      ctx.fillStyle = "#5eead4";
+      ctx.fillText(`⚡ SQUAD ROSTER (${pCount})`, rosterX + 8, rosterY + 12);
+
+      const now = (typeof performance !== "undefined" && performance.now) ? performance.now() : Date.now();
+      const myId = this.peer ? this.peer.id : (this.isHost ? "host" : "guest");
+
+      for (let i = 0; i < pCount; i++) {
+        const p = players[i];
+        const rowY = rosterY + headerH + i * rowH + 2;
+        const isSelf = myId ? (p.id === myId) : (p.isHost && this.isHost);
+
+        // 1. Connection / Life Status Indicator
+        let statusDot = "#22c55e"; // 🟢 Connected
+        let countdownStr = "";
+        if (p.disconnected) {
+          statusDot = "#f59e0b"; // 🟡 Reconnecting
+          const remainingSec = Math.max(0, ((p.disconnectDeadline || (now + 5000)) - now) / 1000.0);
+          countdownStr = `${remainingSec.toFixed(0)}s`;
+        } else if (!p.isAlive || p.isSpectator) {
+          statusDot = "#64748b"; // 💀 / grey
+        }
+
+        ctx.fillStyle = statusDot;
+        ctx.beginPath();
+        ctx.arc(rosterX + 12, rowY + 5, 3, 0, Math.PI * 2);
+        ctx.fill();
+
+        // 2. Name + Host Crown
+        ctx.font = isSelf ? "bold 9px system-ui, sans-serif" : "9px system-ui, sans-serif";
+        ctx.fillStyle = isSelf ? "#5eead4" : (p.isAlive ? "#e2e8f0" : "#64748b");
+        let nameStr = p.name ? (p.name.length > 7 ? p.name.slice(0, 6) + "…" : p.name) : `P${i + 1}`;
+        if (p.isHost) nameStr = `👑${nameStr}`;
+        ctx.fillText(nameStr, rosterX + 20, rowY + 8);
+
+        // 3. Mini HP Bar or Infection / Countdown badge
+        if (p.disconnected) {
+          ctx.fillStyle = "#fbbf24";
+          ctx.font = "bold 8px monospace";
+          ctx.textAlign = "right";
+          ctx.fillText(`⏳${countdownStr}`, rosterX + rosterW - 8, rowY + 8);
+          ctx.textAlign = "left";
+        } else if (p.isInfected) {
+          ctx.fillStyle = "#39ff14";
+          ctx.font = "bold 8px monospace";
+          ctx.textAlign = "right";
+          ctx.fillText("☣️INF", rosterX + rosterW - 8, rowY + 8);
+          ctx.textAlign = "left";
+        } else if (!p.isAlive || p.isSpectator) {
+          ctx.fillStyle = "#ef4444";
+          ctx.font = "8px monospace";
+          ctx.textAlign = "right";
+          ctx.fillText("DEAD", rosterX + rosterW - 8, rowY + 8);
+          ctx.textAlign = "left";
+        } else {
+          const miniBarW = 28;
+          const miniBarH = 4;
+          const miniBarX = rosterX + rosterW - miniBarW - 8;
+          const miniBarY = rowY + 3;
+
+          ctx.fillStyle = "rgba(0, 0, 0, 0.6)";
+          ctx.fillRect(miniBarX, miniBarY, miniBarW, miniBarH);
+
+          const hpRatio = Math.max(0, Math.min(1, (p.hp || 0) / (p.maxHp || 100)));
+          ctx.fillStyle = hpRatio > 0.5 ? "#22c55e" : (hpRatio > 0.25 ? "#eab308" : "#ef4444");
+          ctx.fillRect(miniBarX, miniBarY, miniBarW * hpRatio, miniBarH);
+
+          ctx.strokeStyle = "rgba(255, 255, 255, 0.2)";
+          ctx.lineWidth = 0.5;
+          ctx.strokeRect(miniBarX, miniBarY, miniBarW, miniBarH);
+        }
+      }
+
+      ctx.restore();
     }
 
     broadcastState() {      if (this.mode !== "CUSTOM_ROOM" || !this.isHost || !this.conn || !this.conn.open) return;
@@ -11044,6 +11279,44 @@
         ctx.restore();
       }
 
+      // Milestone 7 Phase 3: Multiplayer Squad Roster HUD (top-right)
+      if (this.mode === "CUSTOM_ROOM" && this.mpState) {
+        this.drawMPSquadRoster(ctx);
+      }
+
+      // Guest Self-Reconnection Banner Overlay (Milestone 7 Phase 3)
+      if (this.mode === "CUSTOM_ROOM" && !this.isHost && this.isReconnecting) {
+        ctx.save();
+        const rwW = 300, rwH = 40;
+        const rwX = (SCREEN_WIDTH - rwW) / 2;
+        const rwY = 16;
+        ctx.fillStyle = "rgba(15, 23, 42, 0.92)";
+        ctx.strokeStyle = "#00e5ff";
+        ctx.lineWidth = 1.5;
+        if (typeof ctx.roundRect === "function") {
+          ctx.roundRect(rwX, rwY, rwW, rwH, 6);
+        } else {
+          ctx.rect(rwX, rwY, rwW, rwH);
+        }
+        ctx.fill();
+        ctx.stroke();
+
+        const pulse = 0.6 + Math.sin(this.gameTime * 6) * 0.4;
+        ctx.fillStyle = `rgba(0, 229, 255, ${pulse})`;
+        ctx.beginPath();
+        ctx.arc(rwX + 20, rwY + 20, 6, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.textAlign = "left";
+        ctx.fillStyle = "#ffffff";
+        ctx.font = "bold 12px system-ui, sans-serif";
+        ctx.fillText("RECONNECTING TO HOST...", rwX + 36, rwY + 17);
+        ctx.fillStyle = "#94a3b8";
+        ctx.font = "10px system-ui, sans-serif";
+        ctx.fillText(`Attempt #${this.reconnectAttemptId || 1} • Resuming session`, rwX + 36, rwY + 31);
+        ctx.restore();
+      }
+
       // Solo HUD (Compact sleek badge chart top-left)
       if (this.mode === "SOLO") {
         ctx.save();
@@ -11148,34 +11421,66 @@
         ctx.fillStyle = "#ffffff";
         ctx.font = "bold 18px monospace, sans-serif";
         ctx.fillText(`Final Score: ${this.p1Score} | All 5 Levels Conquered!`, SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2 + 20);
-      } else if (this.mode === "CUSTOM_ROOM" && this.mpState && this.mpState.mode === "INFECTION") {
-        // Milestone 6C: Infection Mode Match Resolution & Squad Ranking UI
+      } else if (this.mode === "CUSTOM_ROOM" && this.mpState) {
+        // Milestone 7 Phase 3: Unified Multiplayer Match Resolution & Squad Ranking UI
         const isVictory = (this.mpState.status === "VICTORY" || this.state === "VICTORY");
-        const title = isVictory ? "👑 TEAM VICTORY!" : "💀 TEAM WIPEOUT!";
-        const titleColor = isVictory ? "#ffcc00" : "#ff3344";
-        const bossName = this.mpState.boss?.name ? this.mpState.boss.name.toUpperCase() : "BOSS";
-        const subtitle = isVictory
-          ? `${bossName} DEFEATED!`
-          : "ALL PLAYERS ELIMINATED!";
+        let title = isVictory ? "👑 TEAM VICTORY!" : "💀 TEAM WIPEOUT!";
+        let titleColor = isVictory ? "#ffcc00" : "#ff3344";
+        let subtitle = isVictory ? "ARENA CONQUERED!" : "ALL PLAYERS ELIMINATED!";
+
+        if (!isVictory) {
+          if (this.mpDefeatReason === "QUARANTINE_BREACHED") {
+            title = "☣️ QUARANTINE BREACHED";
+            titleColor = "#ef4444";
+            subtitle = "ALL SQUAD MEMBERS INFECTED AT 60s";
+          } else {
+            title = "💀 TEAM WIPEOUT!";
+            titleColor = "#ef4444";
+            subtitle = "ALL PLAYERS ELIMINATED!";
+          }
+        } else {
+          // Victory branch
+          if (this.mpState.mode === "INFECTION") {
+            if (this.mpState.boss?.type === "COSMIC_BOSS") {
+              title = "🌌 COSMIC VICTORY!";
+              titleColor = "#818cf8";
+              subtitle = "COSMIC OVERLORD DEFEATED!";
+            } else {
+              title = "☣️ INFECTION PURGED!";
+              titleColor = "#22c55e";
+              subtitle = "INFECTED BEHEMOTH DEFEATED!";
+            }
+          } else if (this.mpState.mode === "ELITE") {
+            title = "🔥 DEMON CONQUEST!";
+            titleColor = "#ffcc00";
+            subtitle = "DEMON OVERLORD DEFEATED!";
+          } else {
+            title = "👑 TEAM VICTORY!";
+            titleColor = "#ffcc00";
+            subtitle = "MATCH COMPLETE!";
+          }
+        }
 
         ctx.fillStyle = titleColor;
-        ctx.font = "bold 42px monospace, sans-serif";
-        ctx.fillText(title, SCREEN_WIDTH / 2, 65);
+        ctx.font = "bold 40px monospace, sans-serif";
+        ctx.fillText(title, SCREEN_WIDTH / 2, 60);
 
         ctx.fillStyle = isVictory ? "#00ff88" : "#ffaa00";
-        ctx.font = "bold 18px monospace, sans-serif";
-        ctx.fillText(subtitle, SCREEN_WIDTH / 2, 98);
+        ctx.font = "bold 16px monospace, sans-serif";
+        ctx.fillText(subtitle, SCREEN_WIDTH / 2, 92);
 
         ctx.fillStyle = "#ffffff";
-        ctx.font = "bold 14px monospace, sans-serif";
-        ctx.fillText("── SQUAD BATTLE PERFORMANCE & RANKINGS ──", SCREEN_WIDTH / 2, 134);
+        ctx.font = "bold 13px monospace, sans-serif";
+        ctx.fillText("── SQUAD BATTLE PERFORMANCE & RANKINGS ──", SCREEN_WIDTH / 2, 126);
 
-        // Sort players by damageDealt descending
+        // Sort players by damageDealt descending (fallback to score)
         const rankedPlayers = Array.from(this.mpState.players.values()).sort((a, b) => {
-          return (b.damageDealt || 0) - (a.damageDealt || 0);
+          const dmgDiff = (b.damageDealt || 0) - (a.damageDealt || 0);
+          if (dmgDiff !== 0) return dmgDiff;
+          return (b.score || 0) - (a.score || 0);
         });
 
-        const startY = 168;
+        const startY = 160;
         const rowH = 34;
 
         ctx.font = "13px monospace, sans-serif";
@@ -11183,10 +11488,24 @@
           if (rIdx >= 8) return;
           const y = startY + rIdx * rowH;
           const isAlive = p.isAlive && !p.isSpectator;
-          const statusText = isAlive ? "🟢 SURVIVED" : "💀 ELIMINATED";
-          const statusColor = isAlive ? "#00ff88" : "#ef4444";
-          const weaponName = p.infectionWeapon ? p.infectionWeapon.name : "Unarmed";
-          const dmg = p.damageDealt || 0;
+          let statusText = isAlive ? "🟢 SURVIVED" : "💀 ELIMINATED";
+          let statusColor = isAlive ? "#00ff88" : "#ef4444";
+          if (p.disconnected) {
+            statusText = "🟡 RECONNECTING";
+            statusColor = "#f59e0b";
+          } else if (p.isInfected && isAlive) {
+            statusText = "☣️ INFECTED";
+            statusColor = "#39ff14";
+          }
+
+          let weaponName = "Unarmed";
+          if (p.infectionWeapon) {
+            weaponName = p.infectionWeapon.name || "Weapon";
+          } else if (p.fireballGun) {
+            weaponName = "Fireball Gun";
+          }
+
+          const dmg = p.damageDealt || p.score || 0;
 
           ctx.fillStyle = "rgba(255, 255, 255, 0.05)";
           ctx.fillRect(SCREEN_WIDTH / 2 - 250, y - 20, 500, 26);
@@ -11196,7 +11515,8 @@
           ctx.fillText(`#${rIdx + 1}`, SCREEN_WIDTH / 2 - 240, y - 2);
 
           ctx.fillStyle = p.color || "#00e5ff";
-          const pName = p.name ? (p.name.length > 12 ? p.name.slice(0, 11) + "…" : p.name) : `Player ${rIdx + 1}`;
+          let pName = p.name ? (p.name.length > 12 ? p.name.slice(0, 11) + "…" : p.name) : `Player ${rIdx + 1}`;
+          if (p.isHost) pName = `👑${pName}`;
           ctx.fillText(pName, SCREEN_WIDTH / 2 - 200, y - 2);
 
           ctx.fillStyle = "#94a3b8";
