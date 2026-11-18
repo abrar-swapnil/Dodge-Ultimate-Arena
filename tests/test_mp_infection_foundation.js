@@ -462,7 +462,7 @@ console.log("\n── Suite 7: Host Authority & Snapshot Synchronization ──�
     targetType: "PLAYER",
     targetId: "host-peer",
     sourceId: "guest-peer"
-  });
+  }, "host-peer");
   assertEqual(guestHostP.isInfected, true, "7g: Guest handled MP_INFECTION_EVENT via message dispatcher");
 }
 

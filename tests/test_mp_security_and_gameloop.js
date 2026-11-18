@@ -347,6 +347,95 @@ guest._handleLobbyMessage({
 }, "rogue-peer-999");
 assert(guest.mpState.status === "PLAYING" && guest.state === "PLAYING", "3.5: Guest rejected MP_MATCH_DEFEAT from unauthorized rogue peer");
 
+// 3.6 Missing sender ID (undefined) rejected
+guest._handleLobbyMessage({
+  type: "MP_DAMAGE",
+  eventId: "rogue_dmg_undef",
+  targetId: "guest-001",
+  amount: 30
+}, undefined);
+assert(guestPlayerOnGuest.hp === 50, "3.6: Guest rejected authoritative event with missing sender identity (undefined)");
+
+// 3.7 Empty or whitespace sender ID rejected
+guest._handleLobbyMessage({
+  type: "MP_DAMAGE",
+  eventId: "rogue_dmg_empty",
+  targetId: "guest-001",
+  amount: 30
+}, "");
+guest._handleLobbyMessage({
+  type: "MP_DAMAGE",
+  eventId: "rogue_dmg_ws",
+  targetId: "guest-001",
+  amount: 30
+}, "   ");
+assert(guestPlayerOnGuest.hp === 50, "3.7: Guest rejected authoritative event with empty or whitespace sender ID");
+
+// 3.8 Missing expected host ID on guest rejected (fail-closed)
+const guestNoHost = createGameInstance();
+guestNoHost.isHost = false;
+guestNoHost.hostPeerId = null;
+guestNoHost.peer = { id: "guest-001" };
+guestNoHost.lobbyPlayers.set("guest-001", { name: "Guest", isHost: false });
+guestNoHost.initMPMatch("INFECTION");
+guestNoHost.mpState.hostId = null;
+const targetInNoHost = guestNoHost.mpState.players.get("guest-001");
+targetInNoHost.hp = 100;
+
+guestNoHost._handleLobbyMessage({
+  type: "MP_DAMAGE",
+  eventId: "rogue_dmg_nohost",
+  targetId: "guest-001",
+  amount: 30
+}, "host-001");
+assert(targetInNoHost.hp === 100, "3.8: Guest rejected event when expected host ID is missing (fail-closed)");
+
+// 3.9 Prefix spoofing rejected (exact string match only)
+guest._handleLobbyMessage({
+  type: "MP_DAMAGE",
+  eventId: "rogue_dmg_prefix1",
+  targetId: "guest-001",
+  amount: 30
+}, "host-001-attacker");
+guest._handleLobbyMessage({
+  type: "MP_DAMAGE",
+  eventId: "rogue_dmg_prefix2",
+  targetId: "guest-001",
+  amount: 30
+}, "host-001_evil");
+assert(guestPlayerOnGuest.hp === 50, "3.9: Guest rejected prefix spoofing attack (host-001-attacker)");
+
+// 3.10 Payload claiming senderId/hostId="host-001" from rogue peer rejected
+guest._handleLobbyMessage({
+  type: "MP_DAMAGE",
+  eventId: "rogue_dmg_payload_claim",
+  targetId: "guest-001",
+  amount: 30,
+  senderId: "host-001",
+  hostId: "host-001"
+}, "rogue-peer-999");
+assert(guestPlayerOnGuest.hp === 50, "3.10: Guest derived sender strictly from transport connection, rejecting spoofed payload claims");
+
+// 3.11 Rogue peer cannot trigger MP_MATCH_START or overwrite established host identity
+guest._handleLobbyMessage({
+  type: "MP_MATCH_START",
+  matchId: "rogue_match",
+  hostId: "rogue-host-999"
+}, "rogue-peer-999");
+assert(guest.hostPeerId === "host-001" && guest.mpState.hostId === "host-001",
+  "3.11: Rogue peer cannot trigger MP_MATCH_START or overwrite established host identity");
+
+// 3.12 Mismatched hostId in MP_MATCH_START payload rejected even if transport is host
+const guestFresh = createGameInstance();
+guestFresh.isHost = false;
+guestFresh.hostPeerId = "host-001";
+guestFresh._handleLobbyMessage({
+  type: "MP_MATCH_START",
+  matchId: "mismatch_match",
+  hostId: "fake-host-999"
+}, "host-001");
+assert(!guestFresh.mpState, "3.12: Guest rejected MP_MATCH_START with mismatched hostId payload");
+
 // ─────────────────────────────────────────────────────────────────
 // SECTION 4: Spoofed Sender Identity Rejection (Host-Side)
 // ─────────────────────────────────────────────────────────────────
@@ -535,6 +624,10 @@ setTimeout(() => {
   assert(visibleRafUpdates === 1, "6.4: Visibility transition from Hidden to Visible restored RAF updates smoothly");
 
   // 6.5 Snapshot timing: accumulator bounds snapshots to 25Hz without duplication
+  if (mpHostGame._bgTimer) {
+    clearInterval(mpHostGame._bgTimer);
+    mpHostGame._bgTimer = null;
+  }
   // Restore original update method for physics & snapshot timing check
   delete mpHostGame.update;
   mpHostGame.mode = "CUSTOM_ROOM";

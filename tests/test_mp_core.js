@@ -281,6 +281,7 @@ assert(capturedSnapshot.seq > 0, "Snapshot contains monotonic sequence number");
 const guestGame = createGameInstance();
 guestGame.isHost = false;
 guestGame.peer = { id: "peer-002" };
+guestGame.hostPeerId = "host-peer";
 guestGame.initMPMatch("INFECTION");
 
 guestGame._handleLobbyMessage(capturedSnapshot, "host-peer");

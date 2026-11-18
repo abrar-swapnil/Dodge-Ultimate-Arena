@@ -4468,6 +4468,10 @@
         if (checkData.playerCount >= 8) throw new Error("Room is full (max 8 players).");
 
         const hostPeerId = checkData.hostPeerId;
+        if (!hostPeerId || typeof hostPeerId !== "string" || !hostPeerId.trim()) {
+          throw new Error("Invalid host identity from signaling server.");
+        }
+        this.hostPeerId = hostPeerId;
 
         // 2. Open WebRTC peer and connect to host
         this.peer = new Peer(undefined, PEER_SERVER_CONFIG);
@@ -4534,21 +4538,11 @@
     // Verify if incoming message is from the authoritative host connection (guest only)
     _isFromHost(fromPeerId) {
       if (this.isHost) return false; // Host is authority; never accepts authoritative events from peers
-      const expectedHostId = this.mpState?.hostId || this.hostPeerId;
-      if (!fromPeerId) {
-        // Called without connection ID (e.g. simulated internal dispatch)
-        return true;
-      }
-      if (expectedHostId) {
-        if (fromPeerId === expectedHostId) return true;
-        // Support unit test mock names where default hostId was "host" and mock used "host-peer"
-        if ((expectedHostId === "host" || expectedHostId === "host-peer") &&
-            (fromPeerId === "host" || fromPeerId === "host-peer" || fromPeerId.startsWith("host-peer"))) {
-          return true;
-        }
-        return false;
-      }
-      return true;
+      if (!fromPeerId || typeof fromPeerId !== "string" || !fromPeerId.trim()) return false;
+      const expectedHostId = this.hostPeerId || this.mpState?.hostId;
+      if (!expectedHostId || typeof expectedHostId !== "string" || !expectedHostId.trim()) return false;
+      if (this.hostPeerId && this.mpState?.hostId && this.hostPeerId !== this.mpState.hostId) return false;
+      return fromPeerId === expectedHostId;
     }
 
     // ── Handle incoming lobby messages ────────────────────────────
@@ -4558,10 +4552,12 @@
       switch (msg.type) {
         case "LOBBY_STATE":
           // Full lobby state sync from host
-          this.lobbyPlayers.clear();
-          (msg.players || []).forEach(p => this.lobbyPlayers.set(p.peerId, { name: p.name, shape: p.shape, photo: p.photo || null, isReady: p.isReady, isHost: p.isHost }));
-          this.lobbyMode = msg.mode || this.lobbyMode;
-          this._renderLobbyGrid();
+          if (!this.isHost && this._isFromHost(fromPeerId)) {
+            this.lobbyPlayers.clear();
+            (msg.players || []).forEach(p => this.lobbyPlayers.set(p.peerId, { name: p.name, shape: p.shape, photo: p.photo || null, isReady: p.isReady, isHost: p.isHost }));
+            this.lobbyMode = msg.mode || this.lobbyMode;
+            this._renderLobbyGrid();
+          }
           break;
 
         case "PLAYER_JOIN":
@@ -4589,29 +4585,36 @@
           break;
 
         case "PLAYER_LEFT":
-          const leavingPeerId = fromPeerId || msg.peerId;
-          this.lobbyPlayers.delete(leavingPeerId);
-          this._renderLobbyGrid();
           if (this.isHost) {
+            if (!fromPeerId) return;
+            this.lobbyPlayers.delete(fromPeerId);
+            this._renderLobbyGrid();
             this._broadcastLobbyState();
             this._setLobbyStatus(`👋 A player left. (${this.lobbyPlayers.size}/8)`, "info");
           } else {
+            if (!this._isFromHost(fromPeerId)) return;
+            this.lobbyPlayers.delete(msg.peerId);
+            this._renderLobbyGrid();
             this._setLobbyStatus("🚪 A player left the lobby.", "info");
           }
           break;
 
         case "ROOM_FULL":
-          this._setLobbyStatus("❌ Room is full!", "error");
-          setTimeout(() => this._lobbyLeave(), 2000);
+          if (!this.isHost && this._isFromHost(fromPeerId)) {
+            this._setLobbyStatus("❌ Room is full!", "error");
+            setTimeout(() => this._lobbyLeave(), 2000);
+          }
           break;
 
         case "LOBBY_START":
-          this.lobbyMode = msg.mode;
-          this._hideLobbyAndStartGame();
+          if (!this.isHost && this._isFromHost(fromPeerId)) {
+            this.lobbyMode = msg.mode;
+            this._hideLobbyAndStartGame();
+          }
           break;
 
         case "MP_MATCH_START":
-          if (!this.isHost) {
+          if (!this.isHost && this._isFromHost(fromPeerId)) {
             this.handleMPMatchStart(msg);
           }
           break;
@@ -4669,7 +4672,7 @@
           break;
 
         case "MP_PLAYER_LEFT":
-          if (this.mpState) {
+          if (this.mpState && this._isFromHost(fromPeerId)) {
             const p = this.mpState.players.get(msg.peerId);
             const name = msg.name || (p ? p.name : "A player");
             this.mpState.players.delete(msg.peerId);
@@ -4864,7 +4867,7 @@
 
     initMPMatch(mode) {
       const matchId = this.lobbyRoomCode || ("match_" + Date.now());
-      const hostId = this.isHost ? (this.peer?.id || "host") : (this.hostPeerId || "host");
+      const hostId = this.isHost ? (this.peer?.id || "host") : (this.hostPeerId || null);
       
       this.mpState = {
         matchId: matchId,
@@ -5073,11 +5076,18 @@
     }
 
     handleMPMatchStart(msg) {
-      this.hostPeerId = msg.hostId || this.hostPeerId;
+      if (this.hostPeerId && msg.hostId && msg.hostId !== this.hostPeerId) {
+        console.warn(`[MP] Ignored MP_MATCH_START with mismatched hostId ${msg.hostId} (expected ${this.hostPeerId})`);
+        return;
+      }
+      const verifiedHostId = this.hostPeerId || msg.hostId;
+      if (!this.hostPeerId && verifiedHostId) {
+        this.hostPeerId = verifiedHostId;
+      }
       this.mpState = {
         matchId: msg.matchId,
         status: "PLAYING",
-        hostId: msg.hostId,
+        hostId: verifiedHostId,
         mode: msg.mode || "ELITE",
         players: new Map(),
         enemies: new Map(),
