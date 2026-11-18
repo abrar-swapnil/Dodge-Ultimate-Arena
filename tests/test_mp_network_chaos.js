@@ -143,6 +143,7 @@ function makeHostGame(mode = "INFECTION") {
 function makeGuestGame(guestId = "guest-1", mode = "INFECTION") {
   const g = createGameInstance();
   g.isHost = false;
+  g.hostPeerId = "host-peer";
   g.mode = "CUSTOM_ROOM";
   g.peer = { id: guestId, destroy: () => {} };
   g.lobbyRoomCode = "CHAOS1";

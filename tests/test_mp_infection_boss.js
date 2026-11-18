@@ -191,6 +191,7 @@ function makeGuestGame() {
   const g = createGameInstance();
   g.isHost = false;
   g.mode = "CUSTOM_ROOM";
+  g.hostPeerId = "host-peer";
   g.peer = { id: "guest-peer" };
   return g;
 }

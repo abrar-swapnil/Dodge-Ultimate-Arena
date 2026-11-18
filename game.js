@@ -4258,7 +4258,7 @@
       ]);
       if (!ALLOWED_GUEST_REQUESTS.has(msg.type)) return;
 
-      const hostId = this.mpState?.hostId || this.hostPeerId;
+      const hostId = this.hostPeerId;
       if (hostId) {
         const conn = this.mpConnections.get(hostId);
         if (conn?.reliable && conn.reliable.open) {
@@ -4481,16 +4481,32 @@
           setTimeout(reject, 10000);
         });
 
+        // Star topology enforcement: Guest never accepts incoming connections from peers
+        this.peer.on("connection", (incomingConn) => {
+          console.warn(`[MP] Guest rejecting unauthorized incoming peer connection from ${incomingConn?.peer}`);
+          try { incomingConn.close(); } catch (e) {}
+        });
+
         // Reliable channel (critical events)
         const reliable = this.peer.connect(hostPeerId, { reliable: true, label: "cmd" });
         // Unreliable channel (movement snapshots — future use)
         const unreliable = this.peer.connect(hostPeerId, { reliable: false, maxRetransmits: 0, ordered: false, label: "sync" });
 
-        // Listen for host messages on both channels immediately to prevent missed events
-        reliable.on("data", (msg) => this._handleLobbyMessage(msg, hostPeerId));
+        // Listen for host messages on both channels verifying transport .peer identity against hostPeerId
+        reliable.on("data", (msg) => {
+          const senderPeer = reliable.peer || hostPeerId;
+          if (senderPeer === this.hostPeerId) {
+            this._handleLobbyMessage(msg, senderPeer);
+          }
+        });
         reliable.on("close", () => this._handlePeerDisconnect(hostPeerId));
         reliable.on("error", () => this._handlePeerDisconnect(hostPeerId));
-        unreliable.on("data", (msg) => this._handleLobbyMessage(msg, hostPeerId));
+        unreliable.on("data", (msg) => {
+          const senderPeer = unreliable.peer || hostPeerId;
+          if (senderPeer === this.hostPeerId) {
+            this._handleLobbyMessage(msg, senderPeer);
+          }
+        });
         unreliable.on("close", () => this._handlePeerDisconnect(hostPeerId));
 
         await new Promise((resolve, reject) => {
@@ -4539,10 +4555,12 @@
     _isFromHost(fromPeerId) {
       if (this.isHost) return false; // Host is authority; never accepts authoritative events from peers
       if (!fromPeerId || typeof fromPeerId !== "string" || !fromPeerId.trim()) return false;
-      const expectedHostId = this.hostPeerId || this.mpState?.hostId;
-      if (!expectedHostId || typeof expectedHostId !== "string" || !expectedHostId.trim()) return false;
-      if (this.hostPeerId && this.mpState?.hostId && this.hostPeerId !== this.mpState.hostId) return false;
-      return fromPeerId === expectedHostId;
+      // Section A: this.hostPeerId is the ONLY trusted expected host identity for guests.
+      // If this.hostPeerId is missing, reject authoritative events. Never fall back to this.mpState?.hostId.
+      if (!this.hostPeerId || typeof this.hostPeerId !== "string" || !this.hostPeerId.trim()) return false;
+      // If both IDs exist, require exact equality
+      if (this.mpState?.hostId && this.hostPeerId !== this.mpState.hostId) return false;
+      return fromPeerId === this.hostPeerId;
     }
 
     // ── Handle incoming lobby messages ────────────────────────────
@@ -5076,18 +5094,18 @@
     }
 
     handleMPMatchStart(msg) {
-      if (this.hostPeerId && msg.hostId && msg.hostId !== this.hostPeerId) {
-        console.warn(`[MP] Ignored MP_MATCH_START with mismatched hostId ${msg.hostId} (expected ${this.hostPeerId})`);
+      if (!this.hostPeerId || typeof this.hostPeerId !== "string" || !this.hostPeerId.trim()) {
+        console.warn("[MP] Rejected MP_MATCH_START: hostPeerId not established via trusted signaling");
         return;
       }
-      const verifiedHostId = this.hostPeerId || msg.hostId;
-      if (!this.hostPeerId && verifiedHostId) {
-        this.hostPeerId = verifiedHostId;
+      if (msg.hostId && msg.hostId !== this.hostPeerId) {
+        console.warn(`[MP] Ignored MP_MATCH_START with mismatched hostId ${msg.hostId} (expected ${this.hostPeerId})`);
+        return;
       }
       this.mpState = {
         matchId: msg.matchId,
         status: "PLAYING",
-        hostId: verifiedHostId,
+        hostId: this.hostPeerId,
         mode: msg.mode || "ELITE",
         players: new Map(),
         enemies: new Map(),

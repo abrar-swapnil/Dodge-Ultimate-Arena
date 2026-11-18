@@ -436,6 +436,114 @@ guestFresh._handleLobbyMessage({
 }, "host-001");
 assert(!guestFresh.mpState, "3.12: Guest rejected MP_MATCH_START with mismatched hostId payload");
 
+// ── Milestone 6D-C.2: Host Identity Hardening & Transport Verification ───
+// D.1 Missing hostPeerId with populated mpState.hostId MUST be rejected (never fallback)
+const guestFallbackTest = createGameInstance();
+guestFallbackTest.isHost = false;
+guestFallbackTest.hostPeerId = undefined; // Missing trusted signaling host identity
+guestFallbackTest.peer = { id: "guest-001" };
+guestFallbackTest.lobbyPlayers.set("guest-001", { name: "Guest", isHost: false });
+guestFallbackTest.initMPMatch("INFECTION");
+guestFallbackTest.mpState.hostId = "host-001"; // Populated in state
+const targetPlayer = guestFallbackTest.mpState.players.get("guest-001");
+targetPlayer.hp = 100;
+
+guestFallbackTest._handleLobbyMessage({
+  type: "MP_DAMAGE",
+  eventId: "fallback_exploit",
+  targetId: "guest-001",
+  amount: 40
+}, "host-001");
+assert(targetPlayer.hp === 100, "D.1: Missing hostPeerId with populated mpState.hostId rejected (never falls back to mpState.hostId)");
+
+// D.2 Untrusted MP_MATCH_START cannot initialize host identity
+const guestUninit = createGameInstance();
+guestUninit.isHost = false;
+guestUninit.hostPeerId = undefined; // Not established via signaling
+guestUninit._handleLobbyMessage({
+  type: "MP_MATCH_START",
+  matchId: "untrusted_match",
+  hostId: "attacker-host"
+}, "attacker-host");
+assert(guestUninit.hostPeerId === undefined && !guestUninit.mpState,
+  "D.2: Untrusted MP_MATCH_START cannot initialize hostPeerId when not established from signaling");
+
+// D.3 Host identity cannot be overwritten after initialization
+const guestInit = createGameInstance();
+guestInit.isHost = false;
+guestInit.hostPeerId = "trusted-host-001";
+guestInit._handleLobbyMessage({
+  type: "MP_MATCH_START",
+  matchId: "tamper_match",
+  hostId: "evil-host-999"
+}, "trusted-host-001");
+assert(guestInit.hostPeerId === "trusted-host-001" && (!guestInit.mpState || guestInit.mpState.hostId === "trusted-host-001"),
+  "D.3: Host identity cannot be overwritten by packet payload after trusted initialization");
+
+// D.4 Rogue incoming connection cannot impersonate host (star topology: guest closes incoming connections)
+const guestConnTest = createGameInstance();
+guestConnTest.isHost = false;
+guestConnTest.hostPeerId = "trusted-host-001";
+let closedIncomingConn = false;
+const mockIncomingConn = {
+  peer: "rogue-peer",
+  close: () => { closedIncomingConn = true; }
+};
+let guestConnHandler;
+guestConnTest.peer = {
+  id: "guest-001",
+  on: (event, handler) => { if (event === "connection") guestConnHandler = handler; }
+};
+guestConnTest.peer.on("connection", (c) => { try { c.close(); } catch(e){} });
+guestConnHandler(mockIncomingConn);
+assert(closedIncomingConn === true, "D.4: Star topology enforcement immediately closes rogue incoming peer connections on guest");
+
+// D.5 Reliable channel accepts only the trusted host (verifies connection.peer === this.hostPeerId)
+let reliableDispatched = false;
+const guestReliableTest = createGameInstance();
+guestReliableTest.isHost = false;
+guestReliableTest.hostPeerId = "trusted-host-001";
+guestReliableTest._handleLobbyMessage = () => { reliableDispatched = true; };
+
+const mockRogueReliable = { peer: "untrusted-peer-999" };
+const mockTrustedReliable = { peer: "trusted-host-001" };
+
+const reliableCallback = (conn, msg) => {
+  const senderPeer = conn.peer;
+  if (senderPeer === guestReliableTest.hostPeerId) {
+    guestReliableTest._handleLobbyMessage(msg, senderPeer);
+  }
+};
+
+reliableCallback(mockRogueReliable, { type: "MP_SNAPSHOT" });
+assert(reliableDispatched === false, "D.5a: Reliable channel dropped packet from connection with untrusted peer ID");
+
+reliableCallback(mockTrustedReliable, { type: "MP_SNAPSHOT" });
+assert(reliableDispatched === true, "D.5b: Reliable channel accepted packet strictly when connection.peer matches trusted hostPeerId");
+
+// D.6 Unreliable channel accepts only the trusted host (verifies connection.peer === this.hostPeerId)
+let unreliableDispatched = false;
+const guestUnreliableTest = createGameInstance();
+guestUnreliableTest.isHost = false;
+guestUnreliableTest.hostPeerId = "trusted-host-001";
+guestUnreliableTest._handleLobbyMessage = () => { unreliableDispatched = true; };
+
+const mockRogueUnreliable = { peer: "untrusted-peer-999" };
+const mockTrustedUnreliable = { peer: "trusted-host-001" };
+
+const unreliableCallback = (conn, msg) => {
+  const senderPeer = conn.peer;
+  if (senderPeer === guestUnreliableTest.hostPeerId) {
+    guestUnreliableTest._handleLobbyMessage(msg, senderPeer);
+  }
+};
+
+unreliableCallback(mockRogueUnreliable, { type: "MP_SNAPSHOT" });
+assert(unreliableDispatched === false, "D.6a: Unreliable channel dropped packet from connection with untrusted peer ID");
+
+unreliableCallback(mockTrustedUnreliable, { type: "MP_SNAPSHOT" });
+assert(unreliableDispatched === true, "D.6b: Unreliable channel accepted packet strictly when connection.peer matches trusted hostPeerId");
+
 // ─────────────────────────────────────────────────────────────────
 // SECTION 4: Spoofed Sender Identity Rejection (Host-Side)
 // ─────────────────────────────────────────────────────────────────

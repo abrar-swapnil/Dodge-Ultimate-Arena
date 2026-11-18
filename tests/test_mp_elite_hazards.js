@@ -178,6 +178,7 @@ function makeHostGame() {
 function makeGuestGame() {
   const g = createGameInstance();
   g.isHost = false;
+  g.hostPeerId = "host-peer";
   g.peer   = { id: "guest-peer" };
   g.mpConnections        = new Map();
   g.floatingTexts        = g.floatingTexts || [];
