@@ -4492,19 +4492,33 @@
         // Unreliable channel (movement snapshots — future use)
         const unreliable = this.peer.connect(hostPeerId, { reliable: false, maxRetransmits: 0, ordered: false, label: "sync" });
 
-        // Listen for host messages on both channels verifying transport .peer identity against hostPeerId
+        // Immediate connection identity verification
+        if (!reliable || !reliable.peer || typeof reliable.peer !== "string" || reliable.peer !== this.hostPeerId) {
+          try { reliable?.close?.(); } catch (e) {}
+          throw new Error("Reliable connection peer identity mismatch with trusted host.");
+        }
+        if (!unreliable || !unreliable.peer || typeof unreliable.peer !== "string" || unreliable.peer !== this.hostPeerId) {
+          try { unreliable?.close?.(); } catch (e) {}
+          throw new Error("Unreliable connection peer identity mismatch with trusted host.");
+        }
+
+        // Listen for host messages on both channels deriving sender identity exclusively from transport .peer
         reliable.on("data", (msg) => {
-          const senderPeer = reliable.peer || hostPeerId;
-          if (senderPeer === this.hostPeerId) {
+          const senderPeer = reliable.peer;
+          if (senderPeer && typeof senderPeer === "string" && senderPeer.trim() && senderPeer === this.hostPeerId) {
             this._handleLobbyMessage(msg, senderPeer);
+          } else {
+            console.warn(`[MP] Dropped reliable message from invalid or untrusted transport peer identity: '${senderPeer}'`);
           }
         });
         reliable.on("close", () => this._handlePeerDisconnect(hostPeerId));
         reliable.on("error", () => this._handlePeerDisconnect(hostPeerId));
         unreliable.on("data", (msg) => {
-          const senderPeer = unreliable.peer || hostPeerId;
-          if (senderPeer === this.hostPeerId) {
+          const senderPeer = unreliable.peer;
+          if (senderPeer && typeof senderPeer === "string" && senderPeer.trim() && senderPeer === this.hostPeerId) {
             this._handleLobbyMessage(msg, senderPeer);
+          } else {
+            console.warn(`[MP] Dropped unreliable message from invalid or untrusted transport peer identity: '${senderPeer}'`);
           }
         });
         unreliable.on("close", () => this._handlePeerDisconnect(hostPeerId));

@@ -505,21 +505,28 @@ guestReliableTest.isHost = false;
 guestReliableTest.hostPeerId = "trusted-host-001";
 guestReliableTest._handleLobbyMessage = () => { reliableDispatched = true; };
 
-const mockRogueReliable = { peer: "untrusted-peer-999" };
-const mockTrustedReliable = { peer: "trusted-host-001" };
-
 const reliableCallback = (conn, msg) => {
-  const senderPeer = conn.peer;
-  if (senderPeer === guestReliableTest.hostPeerId) {
+  const senderPeer = conn?.peer;
+  if (senderPeer && typeof senderPeer === "string" && senderPeer.trim() && senderPeer === guestReliableTest.hostPeerId) {
     guestReliableTest._handleLobbyMessage(msg, senderPeer);
   }
 };
 
-reliableCallback(mockRogueReliable, { type: "MP_SNAPSHOT" });
-assert(reliableDispatched === false, "D.5a: Reliable channel dropped packet from connection with untrusted peer ID");
+reliableDispatched = false;
+reliableCallback({ peer: "untrusted-peer-999" }, { type: "MP_SNAPSHOT" });
+assert(reliableDispatched === false, "D.5a: Reliable channel rejected packet from connection with rogue peer ID");
 
-reliableCallback(mockTrustedReliable, { type: "MP_SNAPSHOT" });
-assert(reliableDispatched === true, "D.5b: Reliable channel accepted packet strictly when connection.peer matches trusted hostPeerId");
+reliableDispatched = false;
+reliableCallback({ peer: undefined }, { type: "MP_SNAPSHOT" });
+assert(reliableDispatched === false, "D.5b: Reliable channel rejected packet when transport peer identity is undefined");
+
+reliableDispatched = false;
+reliableCallback({ peer: "" }, { type: "MP_SNAPSHOT" });
+assert(reliableDispatched === false, "D.5c: Reliable channel rejected packet when transport peer identity is empty string");
+
+reliableDispatched = false;
+reliableCallback({ peer: "trusted-host-001" }, { type: "MP_SNAPSHOT" });
+assert(reliableDispatched === true, "D.5d: Reliable channel accepted packet strictly when connection.peer matches trusted hostPeerId");
 
 // D.6 Unreliable channel accepts only the trusted host (verifies connection.peer === this.hostPeerId)
 let unreliableDispatched = false;
@@ -528,21 +535,28 @@ guestUnreliableTest.isHost = false;
 guestUnreliableTest.hostPeerId = "trusted-host-001";
 guestUnreliableTest._handleLobbyMessage = () => { unreliableDispatched = true; };
 
-const mockRogueUnreliable = { peer: "untrusted-peer-999" };
-const mockTrustedUnreliable = { peer: "trusted-host-001" };
-
 const unreliableCallback = (conn, msg) => {
-  const senderPeer = conn.peer;
-  if (senderPeer === guestUnreliableTest.hostPeerId) {
+  const senderPeer = conn?.peer;
+  if (senderPeer && typeof senderPeer === "string" && senderPeer.trim() && senderPeer === guestUnreliableTest.hostPeerId) {
     guestUnreliableTest._handleLobbyMessage(msg, senderPeer);
   }
 };
 
-unreliableCallback(mockRogueUnreliable, { type: "MP_SNAPSHOT" });
-assert(unreliableDispatched === false, "D.6a: Unreliable channel dropped packet from connection with untrusted peer ID");
+unreliableDispatched = false;
+unreliableCallback({ peer: "untrusted-peer-999" }, { type: "MP_SNAPSHOT" });
+assert(unreliableDispatched === false, "D.6a: Unreliable channel rejected packet from connection with rogue peer ID");
 
-unreliableCallback(mockTrustedUnreliable, { type: "MP_SNAPSHOT" });
-assert(unreliableDispatched === true, "D.6b: Unreliable channel accepted packet strictly when connection.peer matches trusted hostPeerId");
+unreliableDispatched = false;
+unreliableCallback({ peer: undefined }, { type: "MP_SNAPSHOT" });
+assert(unreliableDispatched === false, "D.6b: Unreliable channel rejected packet when transport peer identity is undefined");
+
+unreliableDispatched = false;
+unreliableCallback({ peer: "" }, { type: "MP_SNAPSHOT" });
+assert(unreliableDispatched === false, "D.6c: Unreliable channel rejected packet when transport peer identity is empty string");
+
+unreliableDispatched = false;
+unreliableCallback({ peer: "trusted-host-001" }, { type: "MP_SNAPSHOT" });
+assert(unreliableDispatched === true, "D.6d: Unreliable channel accepted packet strictly when connection.peer matches trusted hostPeerId");
 
 // ─────────────────────────────────────────────────────────────────
 // SECTION 4: Spoofed Sender Identity Rejection (Host-Side)
