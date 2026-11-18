@@ -4395,14 +4395,18 @@
             body: JSON.stringify({ roomCode: this.lobbyRoomCode, peerId: myPeerId }),
           });
         } catch (e) {}
-        // Notify all connected peers
-        for (const [, conn] of this.mpConnections) {
-          if (conn.reliable?.open) conn.reliable.send({ type: "PLAYER_LEFT", peerId: myPeerId });
-          conn.reliable?.close();
-          conn.unreliable?.close();
+      }
+      // Notify all connected peers and close connections
+      for (const [, conn] of this.mpConnections) {
+        if (myPeerId && conn.reliable?.open) {
+          try { conn.reliable.send({ type: "PLAYER_LEFT", peerId: myPeerId }); } catch (e) {}
         }
-        this.mpConnections.clear();
-        this.peer?.destroy();
+        try { conn.reliable?.close(); } catch (e) {}
+        try { conn.unreliable?.close(); } catch (e) {}
+      }
+      this.mpConnections.clear();
+      if (this.peer) {
+        try { this.peer.destroy(); } catch (e) {}
         this.peer = null;
       }
       this.lobbyRoomCode = null;
@@ -4411,6 +4415,17 @@
       this.isHost = false;
       this._isCreatingRoom = false;
       this._isJoiningRoom = false;
+
+      // Milestone 7 Phase 4: Full match state & reconnection lifecycle cleanup
+      this.mpState = null;
+      this.hostPeerId = null;
+      this.isReconnecting = false;
+      this.activeToken = null;
+      this.pendingToken = null;
+      this._pendingReconnectConn = null;
+      this.reconnectAttemptId = 0;
+      if (this.reconnectingPeers) this.reconnectingPeers.clear();
+      if (this._pendingIncomingConns) this._pendingIncomingConns.clear();
 
       const createBtn = document.getElementById("btn-create-room");
       if (createBtn) { createBtn.disabled = false; createBtn.textContent = "Create Room"; }
@@ -4839,9 +4854,31 @@
       return fromPeerId === this.hostPeerId;
     }
 
+    // ── Milestone 7 Phase 4: Bounded Event Deduplication ─────────
+    _addProcessedEvent(eventId) {
+      if (!this.mpState || !eventId) return;
+      if (!this.mpState.processedEvents) this.mpState.processedEvents = new Set();
+      this.mpState.processedEvents.add(eventId);
+      if (this.mpState.processedEvents.size > 2000) {
+        let count = 0;
+        for (const oldKey of this.mpState.processedEvents) {
+          this.mpState.processedEvents.delete(oldKey);
+          if (++count >= 500) break;
+        }
+      }
+    }
+
     // ── Handle incoming lobby messages ────────────────────────────
     _handleLobbyMessage(msg, fromPeerId) {
       if (!msg || !msg.type) return;
+
+      const now = (typeof performance !== "undefined" && performance.now) ? performance.now() : Date.now();
+      if (!this.isHost && this._isFromHost(fromPeerId)) {
+        this.lastHostMessageTime = now;
+      } else if (this.isHost && this.mpState && fromPeerId) {
+        const senderP = this.mpState.players.get(fromPeerId);
+        if (senderP) senderP.lastHeartbeatResponseTime = now;
+      }
 
       switch (msg.type) {
         case "LOBBY_STATE":
@@ -4937,7 +4974,7 @@
           // Directional security: Accepted strictly from authenticated host by guests
           if (this.mpState && this._isFromHost(fromPeerId)) {
             if (msg.eventId && this.mpState.processedEvents.has(msg.eventId)) return;
-            if (msg.eventId) this.mpState.processedEvents.add(msg.eventId);
+            if (msg.eventId) this._addProcessedEvent(msg.eventId);
             const target = this.mpState.players.get(msg.targetId);
             if (target) {
               target.hp = Math.max(0, msg.remainingHp !== undefined ? msg.remainingHp : (target.hp - msg.amount));
@@ -4950,7 +4987,7 @@
           // Directional security: Accepted strictly from authenticated host by guests
           if (this.mpState && this._isFromHost(fromPeerId)) {
             if (msg.eventId && this.mpState.processedEvents.has(msg.eventId)) return;
-            if (msg.eventId) this.mpState.processedEvents.add(msg.eventId);
+            if (msg.eventId) this._addProcessedEvent(msg.eventId);
             const target = this.mpState.players.get(msg.targetId);
             if (target) {
               target.hp = 0;
@@ -4985,7 +5022,7 @@
           // Directional security: Accepted strictly from authenticated host by guests
           if (this.mpState && this._isFromHost(fromPeerId)) {
             if (msg.eventId && this.mpState.processedEvents.has(msg.eventId)) return;
-            if (msg.eventId) this.mpState.processedEvents.add(msg.eventId);
+            if (msg.eventId) this._addProcessedEvent(msg.eventId);
             const target = this.mpState.players.get(msg.targetId);
             if (target) {
               target.hp = Math.min(target.maxHp || 100, msg.remainingHp !== undefined ? msg.remainingHp : (target.hp + (msg.amount || 0)));
@@ -5254,6 +5291,10 @@
               const existing = this.mpConnections.get(fromPeerId) || {};
               if (existing.reliable && existing.reliable !== newConn) {
                 try { existing.reliable.close(); } catch (e) {}
+              }
+              if (existing.unreliable) {
+                try { existing.unreliable.close(); } catch (e) {}
+                existing.unreliable = null;
               }
               existing.reliable = newConn;
               this.mpConnections.set(fromPeerId, existing);
@@ -6237,30 +6278,30 @@
           stateTimer: Math.round((e.stateTimer || 0) * 100) / 100,
           isInfected: !!e.isInfected
         })),
-        projectiles: this.mpState.projectiles.map(pr => ({
+        projectiles: (this.mpState.projectiles && this.mpState.projectiles.length > 0) ? this.mpState.projectiles.map(pr => ({
           id: pr.id,
           x: Math.round(pr.x * 10) / 10,
           y: Math.round(pr.y * 10) / 10
-        })),
-        mines: this.mpState.mines.map(m => ({
+        })) : [],
+        mines: (this.mpState.mines && this.mpState.mines.length > 0) ? this.mpState.mines.map(m => ({
           id: m.id,
           x: Math.round(m.x * 10) / 10,
           y: Math.round(m.y * 10) / 10,
           radius: m.radius,
           armed: m.armed
-        })),
+        })) : [],
         // Milestone 5A: Elite Mode pickup + team score sync
         teamScore: this.mpState.teamScore || 0,
-        pickups: (this.mpState.pickups || []).map(pk => ({
+        pickups: (this.mpState.pickups && this.mpState.pickups.length > 0) ? this.mpState.pickups.map(pk => ({
           id: pk.id,
           type: pk.type,
           x: Math.round(pk.x * 10) / 10,
           y: Math.round(pk.y * 10) / 10
-        })),
+        })) : [],
         // Milestone 5B: Elite Mode hazards & phase sync
         currentPhase: this.mpState.currentPhase || 0,
         hazards: {
-          smokeBombs: (this.mpState.hazards?.smokeBombs || []).map(sb => ({
+          smokeBombs: (this.mpState.hazards?.smokeBombs && this.mpState.hazards.smokeBombs.length > 0) ? this.mpState.hazards.smokeBombs.map(sb => ({
             id: sb.id,
             x: Math.round(sb.x),
             y: Math.round(sb.y),
@@ -6268,14 +6309,14 @@
             state: sb.state,
             fuse: Math.round(sb.fuse * 10) / 10,
             duration: Math.round(sb.duration * 10) / 10
-          })),
-          toxicGas: (this.mpState.hazards?.toxicGas || []).map(tg => ({
+          })) : [],
+          toxicGas: (this.mpState.hazards?.toxicGas && this.mpState.hazards.toxicGas.length > 0) ? this.mpState.hazards.toxicGas.map(tg => ({
             id: tg.id,
             x: Math.round(tg.x),
             y: Math.round(tg.y),
             radius: tg.radius,
             duration: Math.round(tg.duration * 10) / 10
-          })),
+          })) : [],
           laserWall: this.mpState.hazards?.laserWall && this.mpState.hazards.laserWall.active ? {
             x: Math.round(this.mpState.hazards.laserWall.x),
             width: this.mpState.hazards.laserWall.width,
@@ -6294,38 +6335,38 @@
           radius: this.mpState.boss.radius || 36,
           isAlive: this.mpState.boss.isAlive
         } : null,
-        bossProjectiles: (this.mpState.bossProjectiles || []).map(bp => ({
+        bossProjectiles: (this.mpState.bossProjectiles && this.mpState.bossProjectiles.length > 0) ? this.mpState.bossProjectiles.map(bp => ({
           id: bp.id,
           type: bp.type,
           x: Math.round(bp.x * 10) / 10,
           y: Math.round(bp.y * 10) / 10
-        })),
-        bossVapors: (this.mpState.bossVapors || []).map(bv => ({
+        })) : [],
+        bossVapors: (this.mpState.bossVapors && this.mpState.bossVapors.length > 0) ? this.mpState.bossVapors.map(bv => ({
           id: bv.id,
           type: bv.type,
           x: Math.round(bv.x * 10) / 10,
           y: Math.round(bv.y * 10) / 10,
           radius: bv.radius
-        })),
-        playerFireballs: (this.mpState.playerFireballs || []).map(pf => ({
+        })) : [],
+        playerFireballs: (this.mpState.playerFireballs && this.mpState.playerFireballs.length > 0) ? this.mpState.playerFireballs.map(pf => ({
           id: pf.id,
           x: Math.round(pf.x * 10) / 10,
           y: Math.round(pf.y * 10) / 10
-        })),
+        })) : [],
         // Milestone 6B & 6C: Infection Mode weapon pickups, projectiles & hazards sync
-        weaponPickups: (this.mpState.weaponPickups || []).map(wpk => ({
+        weaponPickups: (this.mpState.weaponPickups && this.mpState.weaponPickups.length > 0) ? this.mpState.weaponPickups.map(wpk => ({
           id: wpk.id,
           type: wpk.type,
           x: Math.round(wpk.x * 10) / 10,
           y: Math.round(wpk.y * 10) / 10
-        })),
-        infectionProjectiles: (this.mpState.infectionProjectiles || []).map(ip => ({
+        })) : [],
+        infectionProjectiles: (this.mpState.infectionProjectiles && this.mpState.infectionProjectiles.length > 0) ? this.mpState.infectionProjectiles.map(ip => ({
           id: ip.id,
           type: ip.weaponType,
           x: Math.round(ip.x * 10) / 10,
           y: Math.round(ip.y * 10) / 10,
           color: ip.color
-        })),
+        })) : [],
         infectionTimer: Math.round((this.mpState.infectionTimer || 0) * 10) / 10,
         bossBranch: this.mpState.bossBranch || null,
         infectionHazards: this.mpState.infectionHazards ? {
@@ -6609,7 +6650,7 @@
 
       const eventId = explicitEventId || `dmg_${targetId}_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;
       if (this.mpState.processedEvents.has(eventId)) return false; // Dedup
-      this.mpState.processedEvents.add(eventId);
+      this._addProcessedEvent(eventId);
 
       target.hp = Math.max(0, target.hp - amount);
       this.floatingTexts.push(new FloatingText(target.x, target.y - 10, `-${amount} HP`, "#ef4444"));
@@ -6637,7 +6678,7 @@
 
       const eventId = explicitEventId || `heal_${targetId}_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;
       if (this.mpState.processedEvents.has(eventId)) return false;
-      this.mpState.processedEvents.add(eventId);
+      this._addProcessedEvent(eventId);
 
       const before = target.hp;
       target.hp = Math.min(target.maxHp || 100, target.hp + amount);
@@ -6663,7 +6704,7 @@
 
       const elimEventId = `elim_${targetId}_${Date.now()}`;
       if (this.mpState.processedEvents.has(elimEventId)) return false; // Dedup
-      this.mpState.processedEvents.add(elimEventId);
+      this._addProcessedEvent(elimEventId);
 
       target.hp = 0;
       target.isAlive = false;
@@ -7549,7 +7590,7 @@
 
         const eventId = explicitEventId || `inf_p_${targetId}_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;
         if (st.processedEvents.has(eventId)) return false; // Dedup
-        st.processedEvents.add(eventId);
+        this._addProcessedEvent(eventId);
 
         // Mutate state to infected (NO speed buff, NO extra abilities)
         player.isInfected = true;
@@ -7573,7 +7614,7 @@
 
         const eventId = explicitEventId || `inf_e_${targetId}_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;
         if (st.processedEvents.has(eventId)) return false; // Dedup
-        st.processedEvents.add(eventId);
+        this._addProcessedEvent(eventId);
 
         // Mutate state to infected (NO speed buff, NO extra abilities)
         enemy.isInfected = true;
@@ -7598,7 +7639,7 @@
     handleMPInfectionEvent(msg) {
       if (!this.mpState || this.mpState.mode !== "INFECTION") return;
       if (msg.eventId && this.mpState.processedEvents.has(msg.eventId)) return; // Dedup
-      if (msg.eventId) this.mpState.processedEvents.add(msg.eventId);
+      if (msg.eventId) this._addProcessedEvent(msg.eventId);
 
       if (msg.targetType === "PLAYER") {
         const p = this.mpState.players.get(msg.targetId);
@@ -8305,7 +8346,7 @@
 
       const eventId = explicitEventId || `wpk_col_${pickupId}_${playerId}_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;
       if (this.mpState.processedEvents.has(eventId)) return false; // Dedup
-      this.mpState.processedEvents.add(eventId);
+      this._addProcessedEvent(eventId);
 
       // Assign weapon to player
       player.infectionWeapon = {
@@ -8338,7 +8379,7 @@
     handleMPWeaponPickup(msg) {
       if (!this.mpState || this.mpState.mode !== "INFECTION") return;
       if (msg.eventId && this.mpState.processedEvents.has(msg.eventId)) return; // Dedup
-      if (msg.eventId) this.mpState.processedEvents.add(msg.eventId);
+      if (msg.eventId) this._addProcessedEvent(msg.eventId);
 
       const p = this.mpState.players.get(msg.playerId);
       const wDef = INFECTION_WEAPONS[msg.weaponType];
@@ -8463,7 +8504,7 @@
 
       const eventId = explicitEventId || `wpk_dmg_${targetId}_${shooterId}_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;
       if (this.mpState.processedEvents.has(eventId)) return null; // Dedup
-      this.mpState.processedEvents.add(eventId);
+      this._addProcessedEvent(eventId);
 
       // Decrement target boss HP if boss entity is present
       shooter.damageDealt = (shooter.damageDealt || 0) + damage;
@@ -8502,7 +8543,7 @@
     handleMPWeaponDamage(msg) {
       if (!this.mpState || this.mpState.mode !== "INFECTION") return;
       if (msg.eventId && this.mpState.processedEvents.has(msg.eventId)) return; // Dedup
-      if (msg.eventId) this.mpState.processedEvents.add(msg.eventId);
+      if (msg.eventId) this._addProcessedEvent(msg.eventId);
 
       if (this.mpState.boss && this.mpState.boss.id === msg.targetId) {
         this.mpState.boss.hp = Math.max(0, this.mpState.boss.hp - (msg.damage || 0));
@@ -8924,8 +8965,13 @@
           continue;
         }
 
-        const cx = p.x + PLAYER_SIZE / 2;
-        const cy = p.y + PLAYER_SIZE / 2;
+        const px = isSelf ? p.x : (p.renderX !== undefined ? (Math.abs(p.renderX - p.x) > 30 ? p.x : (p.renderX * 0.4 + p.x * 0.6)) : p.x);
+        const py = isSelf ? p.y : (p.renderY !== undefined ? (Math.abs(p.renderY - p.y) > 30 ? p.y : (p.renderY * 0.4 + p.y * 0.6)) : p.y);
+        p.renderX = px;
+        p.renderY = py;
+
+        const cx = px + PLAYER_SIZE / 2;
+        const cy = py + PLAYER_SIZE / 2;
         ctx.fillStyle = p.color || "#00e5ff";
         ctx.shadowColor = p.color || "#00e5ff";
         ctx.shadowBlur = isSelf ? 14 : 8;
@@ -8936,21 +8982,21 @@
           ctx.fill();
         } else if (p.shape === "triangle") {
           ctx.beginPath();
-          ctx.moveTo(cx, p.y);
-          ctx.lineTo(p.x + PLAYER_SIZE, p.y + PLAYER_SIZE);
-          ctx.lineTo(p.x, p.y + PLAYER_SIZE);
+          ctx.moveTo(cx, py);
+          ctx.lineTo(px + PLAYER_SIZE, py + PLAYER_SIZE);
+          ctx.lineTo(px, py + PLAYER_SIZE);
           ctx.closePath();
           ctx.fill();
         } else if (p.shape === "diamond") {
           ctx.beginPath();
-          ctx.moveTo(cx, p.y);
-          ctx.lineTo(p.x + PLAYER_SIZE, cy);
-          ctx.lineTo(cx, p.y + PLAYER_SIZE);
-          ctx.lineTo(p.x, cy);
+          ctx.moveTo(cx, py);
+          ctx.lineTo(px + PLAYER_SIZE, cy);
+          ctx.lineTo(cx, py + PLAYER_SIZE);
+          ctx.lineTo(px, cy);
           ctx.closePath();
           ctx.fill();
         } else {
-          ctx.fillRect(p.x, p.y, PLAYER_SIZE, PLAYER_SIZE);
+          ctx.fillRect(px, py, PLAYER_SIZE, PLAYER_SIZE);
         }
 
         ctx.fillStyle = "#ffffff";
@@ -8963,12 +9009,12 @@
         ctx.textAlign = "center";
         ctx.fillStyle = isSelf ? "#5eead4" : "#ffffff";
         const displayName = p.name ? (p.name.length > 10 ? p.name.slice(0, 9) + "…" : p.name) : "Player";
-        ctx.fillText(displayName, cx, p.y - 12);
+        ctx.fillText(displayName, cx, py - 12);
 
         const barW = 32;
         const barH = 4;
         const barX = cx - barW / 2;
-        const barY = p.y - 7;
+        const barY = py - 7;
         
         ctx.fillStyle = "rgba(0, 0, 0, 0.7)";
         ctx.fillRect(barX, barY, barW, barH);
@@ -8991,7 +9037,7 @@
           ctx.stroke();
           ctx.fillStyle = "#39ff14";
           ctx.font = "bold 9px monospace, sans-serif";
-          ctx.fillText("☣️ INFECTED", cx, p.y - 18);
+          ctx.fillText("☣️ INFECTED", cx, py - 18);
         }
 
         // Visual EMP indicator if suppressed
@@ -9834,6 +9880,16 @@
               this.p1.y = myP.y;
             }
 
+            // Milestone 7 Phase 4: Dead-reckoning extrapolation for remote players on guest
+            for (const p of this.mpState.players.values()) {
+              if (p.id === myId) continue;
+              if (!p.isAlive || p.isSpectator || (p.freezeTimer > 0) || p.disconnected) continue;
+              p.x += (p.vx || 0) * dt;
+              p.y += (p.vy || 0) * dt;
+              p.x = Math.max(0, Math.min(SCREEN_WIDTH - PLAYER_SIZE, p.x));
+              p.y = Math.max(0, Math.min(SCREEN_HEIGHT - PLAYER_SIZE, p.y));
+            }
+
             // Milestone 6B & 6C: Update infection projectiles, freeze & weapon cooldown on guest
             if (this.mpState.mode === "INFECTION") {
               if (myP?.infectionWeapon && myP.infectionWeapon.cooldown > 0) {
@@ -9863,15 +9919,17 @@
             this.mpUpdateLiveness(dt);
           }
 
-          // Update texts & particles
+          // Update texts & particles with bounded capacity
           for (let i = this.floatingTexts.length - 1; i >= 0; i--) {
             this.floatingTexts[i].update(dt);
             if (this.floatingTexts[i].alpha <= 0) this.floatingTexts.splice(i, 1);
           }
+          if (this.floatingTexts.length > 60) this.floatingTexts.splice(0, this.floatingTexts.length - 60);
           for (let i = this.particles.length - 1; i >= 0; i--) {
             this.particles[i].update(dt);
             if (this.particles[i].alpha <= 0) this.particles.splice(i, 1);
           }
+          if (this.particles.length > 200) this.particles.splice(0, this.particles.length - 200);
           this.updateHUD();
           return;
         } else {
@@ -9950,15 +10008,17 @@
             this.mpBroadcastSnapshot();
           }
 
-          // Update texts & particles
+          // Update texts & particles with bounded capacity
           for (let i = this.floatingTexts.length - 1; i >= 0; i--) {
             this.floatingTexts[i].update(dt);
             if (this.floatingTexts[i].alpha <= 0) this.floatingTexts.splice(i, 1);
           }
+          if (this.floatingTexts.length > 60) this.floatingTexts.splice(0, this.floatingTexts.length - 60);
           for (let i = this.particles.length - 1; i >= 0; i--) {
             this.particles[i].update(dt);
             if (this.particles[i].alpha <= 0) this.particles.splice(i, 1);
           }
+          if (this.particles.length > 200) this.particles.splice(0, this.particles.length - 200);
           this.updateHUD();
           return;
         }

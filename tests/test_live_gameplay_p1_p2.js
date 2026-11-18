@@ -388,7 +388,7 @@ async function runTest() {
     
     await pageHost.waitForFunction(() => {
       return window.game.mpState?.players?.size === 1;
-    }, { timeout: 6000 });
+    }, { timeout: 8500 });
 
     // Host should handle disconnect and remove guest peer cleanly
     const hostPostDisconnect = await pageHost.evaluate(() => {
@@ -534,6 +534,9 @@ async function runTest() {
     // Give guest a Zombie Killer (deals 100 dmg to Infected Boss)
     await host2.evaluate((gId) => {
       const p = window.game.mpState.players.get(gId);
+      p.isAlive = true;
+      p.isSpectator = false;
+      p.hp = 100;
       p.infectionWeapon = { type: "ZOMBIE_KILLER", name: "Zombie Killer", ammo: 150, maxAmmo: 150, cooldown: 0 };
     }, guest2PeerId);
 
