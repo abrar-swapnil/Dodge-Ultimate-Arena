@@ -2364,6 +2364,10 @@
         if (this.mode === "CUSTOM_ROOM" && this.myRole === "p2") {
           this.p2Input.x = Math.max(-1, Math.min(1, moveX));
           this.p2Input.y = Math.max(-1, Math.min(1, moveY));
+          if (this.mpState) {
+            this.p1Input.x = this.p2Input.x;
+            this.p1Input.y = this.p2Input.y;
+          }
         } else {
           this.p1Input.x = Math.max(-1, Math.min(1, moveX));
           this.p1Input.y = Math.max(-1, Math.min(1, moveY));
@@ -4220,9 +4224,8 @@
       }
     }
 
-    // Reliable broadcast across all connected peers
+    // Reliable broadcast across all connected peers (or to host if guest)
     _broadcastReliable(msg) {
-      if (!this.isHost) return;
       for (const [, conn] of this.mpConnections) {
         if (conn.reliable && conn.reliable.open) {
           try { conn.reliable.send(msg); } catch (e) {}
@@ -10094,16 +10097,32 @@
 
     start() {
       let lastTime = performance.now();
-      const loop = (currentTime) => {
-        const delta = Math.min((currentTime - lastTime) / 1000.0, 0.05);
-        lastTime = currentTime;
+      const tick = (currentTime) => {
+        const now = currentTime || performance.now();
+        const delta = Math.min((now - lastTime) / 1000.0, 0.05);
+        if (delta <= 0) return;
+        lastTime = now;
 
         this.update(delta);
-        this.draw();
+        if (!document.hidden) {
+          this.draw();
+        }
+      };
 
+      const loop = (currentTime) => {
+        tick(currentTime);
         requestAnimationFrame(loop);
       };
       requestAnimationFrame(loop);
+
+      // Background watchdog: If RAF throttles (e.g. host tab in background/occluded),
+      // keep physics & multiplayer simulation running at ~60Hz so peers don't stall
+      setInterval(() => {
+        const now = performance.now();
+        if (now - lastTime >= 15) {
+          tick(now);
+        }
+      }, 16);
     }
   }
 

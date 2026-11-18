@@ -191,11 +191,13 @@ async function runLiveTest() {
     });
     console.log("  [*] Host clicked START MATCH!");
 
-    // Wait for canvas to be active and playing on both
-    await Promise.all([
-      pageHost.waitForFunction(() => (window.game || window.exportedGame)?.state === "PLAYING" || (window.game || window.exportedGame)?.mpState !== null, { timeout: 8000 }).catch(() => null),
-      pageGuest.waitForFunction(() => (window.game || window.exportedGame)?.state === "PLAYING" || (window.game || window.exportedGame)?.mpState !== null, { timeout: 8000 }).catch(() => null)
-    ]);
+    // Poll for match start on both host and guest
+    for (let w = 0; w < 10; w++) {
+      await new Promise(r => setTimeout(r, 300));
+      const sH = await pageHost.evaluate(() => (window.game || window.exportedGame)?.state);
+      const sG = await pageGuest.evaluate(() => (window.game || window.exportedGame)?.state);
+      if (sH === "PLAYING" && sG === "PLAYING") break;
+    }
 
     // Inspect live game state from both tabs
     const hostState = await pageHost.evaluate(() => {
