@@ -4240,6 +4240,11 @@
       for (const [, conn] of this.mpConnections) {
         const ch = (conn.unreliable && conn.unreliable.open) ? conn.unreliable : conn.reliable;
         if (ch && ch.open) {
+          const dc = ch.dataChannel || ch._dc;
+          if (dc && typeof dc.bufferedAmount === "number" && dc.bufferedAmount >= 65536) {
+            // Backpressure threshold reached: skip this frame to prevent buffer bloat
+            continue;
+          }
           try { ch.send(msg); } catch (e) {}
         }
       }
@@ -4254,7 +4259,13 @@
         "MP_INFECTION_SHOOT",
         "MP_PUSH",
         "PLAYER_READY",
-        "PLAYER_LEFT"
+        "PLAYER_LEFT",
+        "MP_HEARTBEAT_ACK",
+        "MP_GUEST_HEARTBEAT",
+        "MP_RECONNECT_REQUEST",
+        "MP_RECONNECT_ACK",
+        "MP_RECONNECT_STATUS",
+        "MP_REOPEN_SYNC"
       ]);
       if (!ALLOWED_GUEST_REQUESTS.has(msg.type)) return;
 
@@ -4417,6 +4428,53 @@
       // 2. Listen for incoming peer connections (up to 7 guests)
       this.peer.on("connection", (incomingConn) => {
         const guestPeerId = incomingConn.peer;
+
+        // In-game reconnection check (HOST ONLY)
+        if (this.mpState && this.mpState.status === "PLAYING") {
+          const player = this.mpState.players.get(guestPeerId);
+          if (!player || !player.disconnected) {
+            console.warn(`[MP] Rejected incoming connection from ${guestPeerId}: not a disconnected player`);
+            try { incomingConn.close(); } catch (e) {}
+            return;
+          }
+
+          // Validate metadata pre-filter
+          const meta = incomingConn.metadata;
+          if (!meta || meta.type !== "RECONNECT" || meta.peerId !== guestPeerId) {
+            console.warn(`[MP] Rejected incoming connection from ${guestPeerId}: invalid metadata`);
+            try { incomingConn.close(); } catch (e) {}
+            return;
+          }
+
+          if (!this.mpTimingSafeEqual(meta.token, player.activeToken)) {
+            console.warn(`[MP] Rejected incoming connection from ${guestPeerId}: token mismatch`);
+            try { incomingConn.close(); } catch (e) {}
+            return;
+          }
+
+          if (typeof meta.attemptId !== "number" || meta.attemptId <= (player.currentAttemptId || 0)) {
+            console.warn(`[MP] Rejected incoming connection from ${guestPeerId}: stale attemptId ${meta.attemptId} <= ${player.currentAttemptId}`);
+            try { incomingConn.close(); } catch (e) {}
+            return;
+          }
+
+          if (!this._pendingIncomingConns) this._pendingIncomingConns = new Map();
+          this._pendingIncomingConns.set(guestPeerId, incomingConn);
+
+          incomingConn.on("data", (msg) => this._handleLobbyMessage(msg, guestPeerId));
+          incomingConn.on("close", () => {
+            if (this._pendingIncomingConns?.get(guestPeerId) === incomingConn) {
+              this._pendingIncomingConns.delete(guestPeerId);
+            }
+          });
+          incomingConn.on("error", () => {
+            if (this._pendingIncomingConns?.get(guestPeerId) === incomingConn) {
+              this._pendingIncomingConns.delete(guestPeerId);
+            }
+          });
+          return;
+        }
+
         if (this.lobbyPlayers.size >= 8) {
           incomingConn.on("open", () => incomingConn.send({ type: "ROOM_FULL" }));
           return;
@@ -4441,8 +4499,20 @@
         });
 
         incomingConn.on("data", (msg) => this._handleLobbyMessage(msg, guestPeerId));
-        incomingConn.on("close", () => this._handlePeerDisconnect(guestPeerId));
-        incomingConn.on("error", () => this._handlePeerDisconnect(guestPeerId));
+        incomingConn.on("close", () => {
+          if (this.mpState && this.mpState.status === "PLAYING") {
+            this._handlePeerTemporaryDisconnect(guestPeerId);
+          } else {
+            this._handlePeerDisconnect(guestPeerId);
+          }
+        });
+        incomingConn.on("error", () => {
+          if (this.mpState && this.mpState.status === "PLAYING") {
+            this._handlePeerTemporaryDisconnect(guestPeerId);
+          } else {
+            this._handlePeerDisconnect(guestPeerId);
+          }
+        });
       });
 
       // 3. Open lobby overlay
@@ -4942,10 +5012,701 @@
           }
           break;
 
+        // ── Milestone 7: Liveness Heartbeats ──
+        case "MP_HEARTBEAT":
+          // Host -> Guest heartbeat
+          if (!this.isHost && this._isFromHost(fromPeerId)) {
+            const now = (typeof performance !== "undefined" && performance.now) ? performance.now() : Date.now();
+            this.lastHostMessageTime = now;
+            this._sendToHostReliable({
+              type: "MP_HEARTBEAT_ACK",
+              seq: msg.seq,
+              echoHostTime: msg.hostTime,
+              guestTime: now
+            });
+          }
+          break;
+
+        case "MP_HEARTBEAT_ACK":
+          // Guest -> Host heartbeat ACK
+          if (this.isHost && this.mpState && fromPeerId) {
+            const p = this.mpState.players.get(fromPeerId);
+            if (p) {
+              p.lastHeartbeatResponseTime = (typeof performance !== "undefined" && performance.now) ? performance.now() : Date.now();
+            }
+          }
+          break;
+
+        case "MP_GUEST_HEARTBEAT":
+          // Guest -> Host heartbeat
+          if (this.isHost && this.mpState && fromPeerId) {
+            const p = this.mpState.players.get(fromPeerId);
+            if (p) {
+              p.lastHeartbeatResponseTime = (typeof performance !== "undefined" && performance.now) ? performance.now() : Date.now();
+              this._sendReliableToPlayer(fromPeerId, {
+                type: "MP_GUEST_HEARTBEAT_ACK",
+                seq: msg.seq,
+                echoGuestTime: msg.guestTime
+              });
+            }
+          }
+          break;
+
+        case "MP_GUEST_HEARTBEAT_ACK":
+          // Host -> Guest heartbeat ACK
+          if (!this.isHost && this._isFromHost(fromPeerId)) {
+            this.lastHostMessageTime = (typeof performance !== "undefined" && performance.now) ? performance.now() : Date.now();
+          }
+          break;
+
+        case "MP_PLAYER_DISCONNECTED":
+          if (this.mpState && this._isFromHost(fromPeerId)) {
+            const p = this.mpState.players.get(msg.peerId);
+            if (p) {
+              p.disconnected = true;
+            }
+            this.floatingTexts.push(new FloatingText(SCREEN_WIDTH / 2, 80, `⚠️ ${msg.name || "A player"} connection lost...`, "#f59e0b"));
+          }
+          break;
+
+        case "MP_PLAYER_RECONNECTED":
+          if (this.mpState && this._isFromHost(fromPeerId)) {
+            const p = this.mpState.players.get(msg.peerId);
+            if (p) {
+              p.disconnected = false;
+            }
+            this.floatingTexts.push(new FloatingText(SCREEN_WIDTH / 2, 80, `⚡ ${msg.name || "A player"} reconnected!`, "#00ff88"));
+          }
+          break;
+
+        // ── Milestone 7: Reconnect Handshake (Option B) ──
+        case "MP_RECONNECT_REQUEST":
+          if (this.isHost && this.mpState && fromPeerId) {
+            const player = this.mpState.players.get(fromPeerId);
+            if (!player || !player.disconnected) {
+              console.warn(`[MP] RECONNECT_REQUEST rejected: player ${fromPeerId} not found or not disconnected`);
+              return;
+            }
+            if (!this.mpTimingSafeEqual(msg.token, player.activeToken)) {
+              console.warn(`[MP] RECONNECT_REQUEST rejected: token authentication failure for ${fromPeerId}`);
+              return;
+            }
+            if (typeof msg.attemptId !== "number" || msg.attemptId <= (player.currentAttemptId || 0)) {
+              console.warn(`[MP] RECONNECT_REQUEST rejected: stale attemptId ${msg.attemptId} <= ${player.currentAttemptId}`);
+              return;
+            }
+
+            // Attempt supersession: invalidate any existing pendingToken & stage new attempt
+            player.currentAttemptId = msg.attemptId;
+            player.pendingToken = this.mpGenerateSecureToken();
+            player.reconnectStatus = "STAGED";
+
+            const fullState = this.mpSerializeFullSync();
+            this._sendReliableToPlayer(fromPeerId, {
+              type: "MP_RECONNECT_SYNC",
+              attemptId: msg.attemptId,
+              pendingToken: player.pendingToken,
+              fullState: fullState,
+              seq: this.mpState.seq
+            });
+          }
+          break;
+
+        case "MP_RECONNECT_SYNC":
+          if (!this.isHost && this._isFromHost(fromPeerId)) {
+            if (msg.attemptId !== this.reconnectAttemptId) {
+              console.warn(`[MP] RECONNECT_SYNC ignored: attemptId mismatch ${msg.attemptId} !== ${this.reconnectAttemptId}`);
+              return;
+            }
+            if (!msg.pendingToken) return;
+
+            const applied = this.mpValidateAndApplyFullSync(msg.fullState);
+            if (applied) {
+              this.pendingToken = msg.pendingToken;
+              this.lastHostMessageTime = (typeof performance !== "undefined" && performance.now) ? performance.now() : Date.now();
+              this._sendToHostReliable({
+                type: "MP_RECONNECT_ACK",
+                attemptId: msg.attemptId,
+                pendingToken: msg.pendingToken
+              });
+            } else {
+              console.error("[MP] RECONNECT_SYNC validation failed: candidate state rejected");
+            }
+          }
+          break;
+
+        case "MP_RECONNECT_ACK":
+          if (this.isHost && this.mpState && fromPeerId) {
+            const player = this.mpState.players.get(fromPeerId);
+            if (!player || !player.disconnected) return;
+            if (msg.attemptId !== player.currentAttemptId) {
+              console.warn(`[MP] RECONNECT_ACK rejected: attemptId mismatch ${msg.attemptId} !== ${player.currentAttemptId}`);
+              return;
+            }
+            if (!player.pendingToken || !this.mpTimingSafeEqual(msg.pendingToken, player.pendingToken)) {
+              console.warn(`[MP] RECONNECT_ACK rejected: invalid pendingToken for ${fromPeerId}`);
+              return;
+            }
+
+            // Atomic commit!
+            player.activeToken = player.pendingToken;
+            player.pendingToken = null;
+            player.disconnected = false;
+            player.disconnectDeadline = null;
+            player.lastHeartbeatResponseTime = (typeof performance !== "undefined" && performance.now) ? performance.now() : Date.now();
+            player.reconnectStatus = "COMMITTED";
+
+            // Swap transport connections
+            if (this._pendingIncomingConns && this._pendingIncomingConns.has(fromPeerId)) {
+              const newConn = this._pendingIncomingConns.get(fromPeerId);
+              const existing = this.mpConnections.get(fromPeerId) || {};
+              if (existing.reliable && existing.reliable !== newConn) {
+                try { existing.reliable.close(); } catch (e) {}
+              }
+              existing.reliable = newConn;
+              this.mpConnections.set(fromPeerId, existing);
+              this._pendingIncomingConns.delete(fromPeerId);
+            }
+
+            // Send confirmation
+            this._sendReliableToPlayer(fromPeerId, {
+              type: "MP_RECONNECT_CONFIRMED",
+              attemptId: msg.attemptId
+            });
+
+            this._broadcastReliable({
+              type: "MP_PLAYER_RECONNECTED",
+              peerId: fromPeerId,
+              name: player.name
+            });
+            this.floatingTexts.push(new FloatingText(SCREEN_WIDTH / 2, 80, `⚡ ${player.name} reconnected!`, "#00ff88"));
+          }
+          break;
+
+        case "MP_RECONNECT_CONFIRMED":
+          if (!this.isHost && this._isFromHost(fromPeerId)) {
+            if (msg.attemptId === this.reconnectAttemptId) {
+              if (this.pendingToken) {
+                this.activeToken = this.pendingToken;
+                this.pendingToken = null;
+              }
+              this.isReconnecting = false;
+              this.state = "PLAYING";
+              if (this.mpState) this.mpState.status = "PLAYING";
+              this.lastHostMessageTime = (typeof performance !== "undefined" && performance.now) ? performance.now() : Date.now();
+
+              if (this._pendingReconnectConn) {
+                this.mpConnections.set(this.hostPeerId, {
+                  reliable: this._pendingReconnectConn,
+                  unreliable: null
+                });
+                this._pendingReconnectConn = null;
+              }
+              this.showAnnouncement("⚡ RECONNECTED", "MATCH RESTORED");
+            }
+          }
+          break;
+
+        case "MP_RECONNECT_STATUS":
+          if (this.isHost && this.mpState && fromPeerId) {
+            const player = this.mpState.players.get(fromPeerId);
+            let status = "REJECTED";
+            if (player) {
+              if (msg.attemptId === player.currentAttemptId) {
+                status = player.reconnectStatus || (player.disconnected ? "STAGED" : "COMMITTED");
+              } else if (msg.attemptId < (player.currentAttemptId || 0)) {
+                status = "SUPERSEDED";
+              }
+            }
+            this._sendReliableToPlayer(fromPeerId, {
+              type: "MP_RECONNECT_STATUS_RESPONSE",
+              attemptId: msg.attemptId,
+              status: status
+            });
+          }
+          break;
+
+        case "MP_RECONNECT_STATUS_RESPONSE":
+          if (!this.isHost && this._isFromHost(fromPeerId)) {
+            if (msg.attemptId === this.reconnectAttemptId && msg.status === "COMMITTED") {
+              if (this.pendingToken) {
+                this.activeToken = this.pendingToken;
+                this.pendingToken = null;
+              }
+              this.isReconnecting = false;
+              this.state = "PLAYING";
+              if (this.mpState) this.mpState.status = "PLAYING";
+              this.lastHostMessageTime = (typeof performance !== "undefined" && performance.now) ? performance.now() : Date.now();
+              if (this._pendingReconnectConn) {
+                this.mpConnections.set(this.hostPeerId, {
+                  reliable: this._pendingReconnectConn,
+                  unreliable: null
+                });
+                this._pendingReconnectConn = null;
+              }
+            }
+          }
+          break;
+
+        case "MP_REOPEN_SYNC":
+          // Handled via separate sync connection
+          break;
+
         // Legacy connection handling (for backwards compat with 2-player mode)
         default:
           if (this.state === "PLAYING") this._handleGameplayMessage(msg);
           break;
+      }
+    }
+
+    // Soft disconnect: marks disconnected and grants 5.0s reconnect window
+    _handlePeerTemporaryDisconnect(peerId) {
+      if (!this.isHost || !this.mpState) return;
+      const player = this.mpState.players.get(peerId);
+      if (!player || player.disconnected) return;
+
+      player.disconnected = true;
+      player.disconnectedAt = (typeof performance !== "undefined" && performance.now) ? performance.now() : Date.now();
+      player.disconnectDeadline = player.disconnectedAt + 5000.0;
+      const name = player.name || "A player";
+
+      this._broadcastReliable({
+        type: "MP_PLAYER_DISCONNECTED",
+        peerId: peerId,
+        name: name,
+        reconnectWindow: 5000
+      });
+
+      this.floatingTexts.push(new FloatingText(SCREEN_WIDTH / 2, 80, `⚠️ ${name} connection lost (reconnecting...)`, "#f59e0b"));
+    }
+
+    _sendReliableToPlayer(peerId, msg) {
+      if (!this.isHost || !peerId || !msg) return;
+      const conn = this.mpConnections.get(peerId);
+      if (conn?.reliable && conn.reliable.open) {
+        try { conn.reliable.send(msg); return; } catch (e) {}
+      }
+      if (this._pendingIncomingConns?.get(peerId)?.open) {
+        try { this._pendingIncomingConns.get(peerId).send(msg); return; } catch (e) {}
+      }
+    }
+
+    mpGenerateSecureToken() {
+      if (typeof crypto !== "undefined" && crypto.getRandomValues) {
+        const arr = new Uint8Array(16);
+        crypto.getRandomValues(arr);
+        return Array.from(arr, b => b.toString(16).padStart(2, "0")).join("");
+      }
+      try {
+        const nodeCrypto = require("crypto");
+        return nodeCrypto.randomBytes(16).toString("hex");
+      } catch (e) {
+        throw new Error("No secure cryptographic random source available");
+      }
+    }
+
+    mpTimingSafeEqual(a, b) {
+      if (typeof a !== "string" || typeof b !== "string") return false;
+      if (a.length !== b.length) return false;
+      let diff = 0;
+      for (let i = 0; i < a.length; i++) {
+        diff |= (a.charCodeAt(i) ^ b.charCodeAt(i));
+      }
+      return diff === 0;
+    }
+
+    mpSerializeFullSync() {
+      if (!this.mpState) return null;
+      const st = this.mpState;
+
+      return {
+        matchId: st.matchId,
+        status: st.status,
+        hostId: st.hostId,
+        mode: st.mode,
+        seq: st.seq || 0,
+        startTime: st.startTime || Date.now(),
+        teamScore: st.teamScore || 0,
+        scoreActive: st.scoreActive !== undefined ? st.scoreActive : true,
+        currentPhase: st.currentPhase || 0,
+        infectionTimer: st.infectionTimer || 0,
+        bossBranch: st.bossBranch || null,
+        directorTimer: st.directorTimer || 0,
+        nextEnemyId: st.nextEnemyId || 1,
+        nextProjId: st.nextProjId || 1,
+        nextMineId: st.nextMineId || 1,
+        nextPickupId: st.nextPickupId || 1,
+        nextHazardId: st.nextHazardId || 1,
+        nextBossAttackId: st.nextBossAttackId || 1,
+        nextFireballId: st.nextFireballId || 1,
+        nextWeaponPickupId: st.nextWeaponPickupId || 1,
+        nextInfectionProjId: st.nextInfectionProjId || 1,
+        nextHeartId: st.nextHeartId || 1,
+        players: Array.from(st.players.values()).map(p => ({
+          id: p.id,
+          name: p.name,
+          shape: p.shape,
+          photo: p.photo || null,
+          color: p.color,
+          isHost: !!p.isHost,
+          x: p.x,
+          y: p.y,
+          vx: p.vx || 0,
+          vy: p.vy || 0,
+          facingX: p.facingX !== undefined ? p.facingX : 1,
+          facingY: p.facingY !== undefined ? p.facingY : 0,
+          hp: p.hp,
+          maxHp: p.maxHp,
+          isAlive: !!p.isAlive,
+          isSpectator: !!p.isSpectator,
+          isInfected: !!p.isInfected,
+          infectionState: p.infectionState || "NORMAL",
+          infectionWeapon: p.infectionWeapon ? {
+            type: p.infectionWeapon.type,
+            ammo: p.infectionWeapon.ammo,
+            maxAmmo: p.infectionWeapon.maxAmmo,
+            cooldown: p.infectionWeapon.cooldown || 0,
+            damage: p.infectionWeapon.damage || 0
+          } : null,
+          fireballGun: p.fireballGun ? {
+            ammo: p.fireballGun.ammo,
+            maxAmmo: p.fireballGun.maxAmmo,
+            cooldown: p.fireballGun.cooldown || 0,
+            damage: p.fireballGun.damage || 0
+          } : null,
+          freezeTimer: p.freezeTimer || 0,
+          freezeType: p.freezeType || null,
+          damageDealt: p.damageDealt || 0,
+          isDashing: !!p.isDashing,
+          suppressedTimer: p.suppressedTimer || 0,
+          disconnected: !!p.disconnected
+        })),
+        enemies: Array.from(st.enemies.values()).map(e => ({
+          id: e.id,
+          type: e.type,
+          state: e.state,
+          x: e.x,
+          y: e.y,
+          vx: e.vx || 0,
+          vy: e.vy || 0,
+          hp: e.hp,
+          maxHp: e.maxHp,
+          size: e.size,
+          speed: e.speed,
+          stateTimer: e.stateTimer || 0,
+          isInfected: !!e.isInfected,
+          infectionState: e.infectionState || "NORMAL",
+          color: e.color || null,
+          attackCooldown: e.attackCooldown || 0
+        })),
+        projectiles: (st.projectiles || []).map(pr => ({ ...pr })),
+        mines: (st.mines || []).map(m => ({ ...m })),
+        pickups: (st.pickups || []).map(pk => ({ ...pk })),
+        weaponPickups: (st.weaponPickups || []).map(wpk => ({ ...wpk })),
+        infectionProjectiles: (st.infectionProjectiles || []).map(ip => ({ ...ip })),
+        hazards: {
+          smokeBombs: (st.hazards?.smokeBombs || []).map(sb => ({ ...sb })),
+          toxicGas: (st.hazards?.toxicGas || []).map(tg => ({ ...tg })),
+          laserWall: st.hazards?.laserWall ? { ...st.hazards.laserWall } : null
+        },
+        hazardTimers: { ...(st.hazardTimers || {}) },
+        boss: st.boss ? { ...st.boss } : null,
+        bossProjectiles: (st.bossProjectiles || []).map(bp => ({ ...bp })),
+        bossVapors: (st.bossVapors || []).map(bv => ({ ...bv })),
+        playerFireballs: (st.playerFireballs || []).map(pf => ({ ...pf })),
+        infectionHazards: {
+          slashes: (st.infectionHazards?.slashes || []).map(s => ({ ...s })),
+          craters: (st.infectionHazards?.craters || []).map(c => ({ ...c })),
+          blackHoles: (st.infectionHazards?.blackHoles || []).map(b => ({ ...b })),
+          whiteHoles: (st.infectionHazards?.whiteHoles || []).map(w => ({ ...w })),
+          jumpTelegraph: st.infectionHazards?.jumpTelegraph ? { ...st.infectionHazards.jumpTelegraph } : null
+        }
+      };
+    }
+
+    mpValidateAndApplyFullSync(fullState) {
+      if (!fullState || typeof fullState !== "object") return false;
+
+      // Validate core required fields
+      if (typeof fullState.matchId !== "string" || !fullState.matchId) return false;
+      if (!["PLAYING", "VICTORY", "DEFEAT"].includes(fullState.status)) return false;
+      if (!["ELITE", "INFECTION"].includes(fullState.mode)) return false;
+      if (!Number.isFinite(fullState.seq)) return false;
+      if (!Array.isArray(fullState.players) || fullState.players.length === 0 || fullState.players.length > 8) return false;
+
+      // Validate players candidate
+      const candidatePlayers = new Map();
+      for (const p of fullState.players) {
+        if (!p || typeof p.id !== "string" || !p.id) return false;
+        if (!Number.isFinite(p.x) || !Number.isFinite(p.y)) return false;
+        if (!Number.isFinite(p.hp) || !Number.isFinite(p.maxHp)) return false;
+        if (p.x < -100 || p.x > SCREEN_WIDTH + 100 || p.y < -100 || p.y > SCREEN_HEIGHT + 100) return false;
+
+        const myId = this.peer?.id || this.myPeerId;
+        const isSelf = (p.id === myId);
+
+        candidatePlayers.set(p.id, {
+          id: p.id,
+          name: typeof p.name === "string" ? p.name : "Player",
+          shape: p.shape || "square",
+          photo: p.photo || null,
+          color: p.color || "#00e5ff",
+          isHost: !!p.isHost,
+          x: p.x,
+          y: p.y,
+          vx: Number.isFinite(p.vx) ? p.vx : 0,
+          vy: Number.isFinite(p.vy) ? p.vy : 0,
+          facingX: Number.isFinite(p.facingX) ? p.facingX : 1,
+          facingY: Number.isFinite(p.facingY) ? p.facingY : 0,
+          hp: Math.max(0, p.hp),
+          maxHp: Math.max(1, p.maxHp),
+          isAlive: !!p.isAlive,
+          isSpectator: !!p.isSpectator,
+          isInfected: !!p.isInfected,
+          infectionState: p.infectionState || (p.isInfected ? "INFECTED" : "NORMAL"),
+          infectionWeapon: p.infectionWeapon ? {
+            type: p.infectionWeapon.type,
+            ammo: p.infectionWeapon.ammo,
+            maxAmmo: p.infectionWeapon.maxAmmo,
+            cooldown: Number.isFinite(p.infectionWeapon.cooldown) ? p.infectionWeapon.cooldown : 0,
+            damage: Number.isFinite(p.infectionWeapon.damage) ? p.infectionWeapon.damage : 0
+          } : null,
+          fireballGun: p.fireballGun ? {
+            ammo: p.fireballGun.ammo,
+            maxAmmo: p.fireballGun.maxAmmo,
+            cooldown: Number.isFinite(p.fireballGun.cooldown) ? p.fireballGun.cooldown : 0,
+            damage: Number.isFinite(p.fireballGun.damage) ? p.fireballGun.damage : 0
+          } : null,
+          freezeTimer: Number.isFinite(p.freezeTimer) ? p.freezeTimer : 0,
+          freezeType: p.freezeType || null,
+          damageDealt: Number.isFinite(p.damageDealt) ? p.damageDealt : 0,
+          isDashing: !!p.isDashing,
+          suppressedTimer: Number.isFinite(p.suppressedTimer) ? p.suppressedTimer : 0,
+          disconnected: !!p.disconnected,
+          input: { x: 0, y: 0, sprint: false },
+          lastInputSeq: 0,
+          isSelf: isSelf
+        });
+      }
+
+      // Validate enemies candidate
+      const candidateEnemies = new Map();
+      if (Array.isArray(fullState.enemies)) {
+        for (const e of fullState.enemies) {
+          if (!e || e.id === undefined) continue;
+          candidateEnemies.set(e.id, {
+            id: e.id,
+            type: e.type,
+            state: e.state,
+            x: Number.isFinite(e.x) ? e.x : 0,
+            y: Number.isFinite(e.y) ? e.y : 0,
+            vx: Number.isFinite(e.vx) ? e.vx : 0,
+            vy: Number.isFinite(e.vy) ? e.vy : 0,
+            hp: Number.isFinite(e.hp) ? e.hp : 100,
+            maxHp: Number.isFinite(e.maxHp) ? e.maxHp : 100,
+            size: Number.isFinite(e.size) ? e.size : 18,
+            speed: Number.isFinite(e.speed) ? e.speed : 100,
+            stateTimer: Number.isFinite(e.stateTimer) ? e.stateTimer : 0,
+            isInfected: !!e.isInfected,
+            infectionState: e.infectionState || "NORMAL",
+            color: e.color || null,
+            attackCooldown: Number.isFinite(e.attackCooldown) ? e.attackCooldown : 0
+          });
+        }
+      }
+
+      // Build validated candidate state
+      const candidateState = {
+        matchId: fullState.matchId,
+        status: fullState.status,
+        hostId: fullState.hostId,
+        mode: fullState.mode,
+        players: candidatePlayers,
+        enemies: candidateEnemies,
+        projectiles: Array.isArray(fullState.projectiles) ? fullState.projectiles.map(pr => ({ ...pr })) : [],
+        mines: Array.isArray(fullState.mines) ? fullState.mines.map(m => ({ ...m })) : [],
+        pickups: Array.isArray(fullState.pickups) ? fullState.pickups.map(pk => ({ ...pk })) : [],
+        weaponPickups: Array.isArray(fullState.weaponPickups) ? fullState.weaponPickups.map(wpk => ({ ...wpk })) : [],
+        infectionProjectiles: Array.isArray(fullState.infectionProjectiles) ? fullState.infectionProjectiles.map(ip => ({ ...ip })) : [],
+        teamScore: Number.isFinite(fullState.teamScore) ? fullState.teamScore : 0,
+        scoreActive: fullState.scoreActive !== undefined ? !!fullState.scoreActive : true,
+        currentPhase: Number.isFinite(fullState.currentPhase) ? fullState.currentPhase : 0,
+        infectionTimer: Number.isFinite(fullState.infectionTimer) ? fullState.infectionTimer : 0,
+        bossBranch: fullState.bossBranch || null,
+        directorTimer: Number.isFinite(fullState.directorTimer) ? fullState.directorTimer : 0,
+        nextEnemyId: fullState.nextEnemyId || 1,
+        nextProjId: fullState.nextProjId || 1,
+        nextMineId: fullState.nextMineId || 1,
+        nextPickupId: fullState.nextPickupId || 1,
+        nextHazardId: fullState.nextHazardId || 1,
+        nextBossAttackId: fullState.nextBossAttackId || 1,
+        nextFireballId: fullState.nextFireballId || 1,
+        nextWeaponPickupId: fullState.nextWeaponPickupId || 1,
+        nextInfectionProjId: fullState.nextInfectionProjId || 1,
+        nextHeartId: fullState.nextHeartId || 1,
+        processedEvents: new Set(),
+        seq: fullState.seq,
+        startTime: fullState.startTime || Date.now(),
+        hazards: {
+          smokeBombs: Array.isArray(fullState.hazards?.smokeBombs) ? fullState.hazards.smokeBombs.map(sb => ({ ...sb })) : [],
+          toxicGas: Array.isArray(fullState.hazards?.toxicGas) ? fullState.hazards.toxicGas.map(tg => ({ ...tg })) : [],
+          laserWall: fullState.hazards?.laserWall ? { ...fullState.hazards.laserWall } : null
+        },
+        hazardTimers: { ...(fullState.hazardTimers || {}) },
+        boss: fullState.boss ? { ...fullState.boss } : null,
+        bossProjectiles: Array.isArray(fullState.bossProjectiles) ? fullState.bossProjectiles.map(bp => ({ ...bp })) : [],
+        bossVapors: Array.isArray(fullState.bossVapors) ? fullState.bossVapors.map(bv => ({ ...bv })) : [],
+        playerFireballs: Array.isArray(fullState.playerFireballs) ? fullState.playerFireballs.map(pf => ({ ...pf })) : [],
+        infectionHazards: {
+          slashes: Array.isArray(fullState.infectionHazards?.slashes) ? fullState.infectionHazards.slashes.map(s => ({ ...s })) : [],
+          craters: Array.isArray(fullState.infectionHazards?.craters) ? fullState.infectionHazards.craters.map(c => ({ ...c })) : [],
+          blackHoles: Array.isArray(fullState.infectionHazards?.blackHoles) ? fullState.infectionHazards.blackHoles.map(b => ({ ...b })) : [],
+          whiteHoles: Array.isArray(fullState.infectionHazards?.whiteHoles) ? fullState.infectionHazards.whiteHoles.map(w => ({ ...w })) : [],
+          jumpTelegraph: fullState.infectionHazards?.jumpTelegraph ? { ...fullState.infectionHazards.jumpTelegraph } : null
+        }
+      };
+
+      // All validations passed! Atomic commit into live state
+      this.mpState = candidateState;
+      this.mpLastSnapshotSeq = fullState.seq;
+
+      // In-place update of this.p1 to preserve Player class instance and its prototype methods!
+      const myId = this.peer?.id || this.myPeerId;
+      const myObj = myId ? this.mpState.players.get(myId) : this.mpState.players.values().next().value;
+      if (myObj && this.p1) {
+        this.p1.x = myObj.x;
+        this.p1.y = myObj.y;
+        this.p1.vx = myObj.vx || 0;
+        this.p1.vy = myObj.vy || 0;
+        this.p1.name = myObj.name;
+        this.p1.color = myObj.color;
+        this.p1.shape = myObj.shape;
+        this.p1.photo = myObj.photo;
+        this.p1.isAlive = myObj.isAlive;
+        this.p1.hp = myObj.hp;
+        this.p1.maxHp = myObj.maxHp;
+        this.p1.isInfected = !!myObj.isInfected;
+        this.p1.infectionState = myObj.infectionState || "NORMAL";
+        this.p1.infectionWeapon = myObj.infectionWeapon ? { ...myObj.infectionWeapon } : null;
+        this.p1.freezeTimer = myObj.freezeTimer || 0;
+        this.p1.freezeType = myObj.freezeType || null;
+        this.p1.suppressedTimer = myObj.suppressedTimer || 0;
+        this.p1.isSpectator = !!myObj.isSpectator;
+      }
+
+      this.updateHUD();
+      return true;
+    }
+
+    startReconnectToHost() {
+      if (this.isHost || !this.hostPeerId || !this.activeToken) return;
+      if (this.isReconnecting) return;
+      this.isReconnecting = true;
+      this.reconnectAttemptId = (this.reconnectAttemptId || 0) + 1;
+      const attemptId = this.reconnectAttemptId;
+
+      console.log(`[MP] Initiating reconnect attempt #${attemptId} to host ${this.hostPeerId}`);
+
+      try {
+        if (!this.peer) return;
+        const reconConn = this.peer.connect(this.hostPeerId, {
+          reliable: true,
+          label: "cmd",
+          metadata: {
+            type: "RECONNECT",
+            peerId: this.peer.id,
+            attemptId: attemptId,
+            token: this.activeToken
+          }
+        });
+
+        this._pendingReconnectConn = reconConn;
+
+        reconConn.on("open", () => {
+          reconConn.send({
+            type: "MP_RECONNECT_REQUEST",
+            attemptId: attemptId,
+            token: this.activeToken,
+            seq: this.mpLastSnapshotSeq || 0
+          });
+        });
+
+        reconConn.on("data", (msg) => {
+          this._handleLobbyMessage(msg, reconConn.peer);
+        });
+
+        reconConn.on("close", () => {
+          if (this._pendingReconnectConn === reconConn) {
+            this._pendingReconnectConn = null;
+          }
+        });
+
+        reconConn.on("error", (err) => {
+          console.warn(`[MP] Reconnect conn error attempt #${attemptId}:`, err);
+        });
+      } catch (err) {
+        console.warn(`[MP] Failed to initiate reconnect attempt #${attemptId}:`, err);
+        this.isReconnecting = false;
+      }
+    }
+
+    mpUpdateLiveness(dt) {
+      if (!this.mpState || this.mpState.status !== "PLAYING") return;
+      const now = (typeof performance !== "undefined" && performance.now) ? performance.now() : Date.now();
+
+      if (this.isHost) {
+        // 1. Host -> Guest Heartbeat at nominal 250ms (4Hz)
+        this.mpHeartbeatTimer = (this.mpHeartbeatTimer || 0) + dt;
+        if (this.mpHeartbeatTimer >= 0.25) {
+          this.mpHeartbeatTimer = 0;
+          this.mpHostHeartbeatSeq = (this.mpHostHeartbeatSeq || 0) + 1;
+          this._broadcastReliable({
+            type: "MP_HEARTBEAT",
+            seq: this.mpHostHeartbeatSeq,
+            hostTime: now
+          });
+        }
+
+        // 2. Host Silence Detection & Disconnect Deadline Enforcement
+        for (const [peerId, p] of this.mpState.players) {
+          if (p.isHost) continue;
+
+          if (!p.disconnected) {
+            const lastActive = p.lastHeartbeatResponseTime || now;
+            if (now - lastActive > 2000.0) {
+              // 2.0s silence threshold exceeded -> Soft disconnect (grant 5.0s window)
+              this._handlePeerTemporaryDisconnect(peerId);
+            }
+          } else {
+            // Already soft-disconnected: check if 5.0s reconnect window expired
+            if (p.disconnectDeadline && now >= p.disconnectDeadline) {
+              // Deadline expired -> Permanent removal
+              this._handlePeerDisconnect(peerId);
+            }
+          }
+        }
+      } else {
+        // GUEST SIDE:
+        // 1. Guest -> Host Heartbeat at nominal 250ms (4Hz)
+        this.mpGuestHeartbeatTimer = (this.mpGuestHeartbeatTimer || 0) + dt;
+        if (this.mpGuestHeartbeatTimer >= 0.25) {
+          this.mpGuestHeartbeatTimer = 0;
+          this.mpGuestHeartbeatSeq = (this.mpGuestHeartbeatSeq || 0) + 1;
+          this._sendToHostReliable({
+            type: "MP_GUEST_HEARTBEAT",
+            seq: this.mpGuestHeartbeatSeq,
+            guestTime: now
+          });
+        }
+
+        // 2. Guest Silence Detection (2.0s without message from host)
+        if (!this.isReconnecting && this.activeToken) {
+          const lastMsg = this.lastHostMessageTime || now;
+          if (now - lastMsg > 2000.0) {
+            console.warn(`[MP] Guest detected host silence (${Math.round(now - lastMsg)}ms > 2000ms), initiating reconnect...`);
+            this.startReconnectToHost();
+          }
+        }
       }
     }
 
@@ -4957,6 +5718,7 @@
           const name = player?.name || "A player";
           this.mpState.players.delete(peerId);
           this.mpConnections.delete(peerId);
+          if (this._pendingIncomingConns) this._pendingIncomingConns.delete(peerId);
           this._broadcastReliable({ type: "MP_PLAYER_LEFT", peerId, name });
           this.floatingTexts.push(new FloatingText(SCREEN_WIDTH / 2, 80, `👋 ${name} disconnected`, "#94a3b8"));
           fetch(`${this._serverBase()}/api/rooms/leave`, {
@@ -5127,7 +5889,15 @@
           suppressedTimer: 0,
           input: { x: 0, y: 0, sprint: false },
           lastInputSeq: 0,
-          isSelf: isSelf
+          isSelf: isSelf,
+          activeToken: this.mpGenerateSecureToken(),
+          pendingToken: null,
+          currentAttemptId: 0,
+          disconnected: false,
+          disconnectedAt: null,
+          disconnectDeadline: null,
+          lastHeartbeatResponseTime: (typeof performance !== "undefined" && performance.now) ? performance.now() : Date.now(),
+          reconnectStatus: null
         };
 
         this.mpState.players.set(peerId, playerObj);
@@ -5211,6 +5981,13 @@
             y: wpk.y
           }))
         };
+        for (const [peerId, connObj] of this.mpConnections.entries()) {
+          const player = this.mpState.players.get(peerId);
+          const perPeerMsg = { ...startMsg, token: player ? player.activeToken : null };
+          if (connObj?.reliable && connObj.reliable.open) {
+            try { connObj.reliable.send(perPeerMsg); } catch (e) {}
+          }
+        }
         this._broadcastReliable(startMsg);
       }
       this._checkBackgroundTimer?.();
@@ -5225,6 +6002,10 @@
         console.warn(`[MP] Ignored MP_MATCH_START with mismatched hostId ${msg.hostId} (expected ${this.hostPeerId})`);
         return;
       }
+      if (msg.token) {
+        this.activeToken = msg.token;
+      }
+      this.lastHostMessageTime = (typeof performance !== "undefined" && performance.now) ? performance.now() : Date.now();
       this.mpState = {
         matchId: msg.matchId,
         status: "PLAYING",
@@ -6504,9 +7285,165 @@
     }
 
     // ══════════════════════════════════════════════════════════════
-    // MULTIPLAYER INFECTION MODE (Milestone 6A)
-    // 4 Propagation Interactions, Host Authority, Deduplication & Sync
+    // MULTIPLAYER INFECTION MODE (Milestone 6A & 7)
+    // Swept-Circle TOI Continuous Collision, Host Authority, Deduplication & Sync
     // ══════════════════════════════════════════════════════════════
+
+    _computeSweptCircleTOI(e1, e2, dt) {
+      if (dt <= 0) return null;
+
+      // Extract properties
+      const s1 = e1.size || PLAYER_SIZE;
+      const s2 = e2.size || PLAYER_SIZE;
+      const r1 = s1 / 2;
+      const r2 = s2 / 2;
+      const R = r1 + r2;
+
+      // Starting positions at t=0 of this step
+      const x1_0 = (e1.prevX !== undefined) ? e1.prevX : e1.x;
+      const y1_0 = (e1.prevY !== undefined) ? e1.prevY : e1.y;
+      const x2_0 = (e2.prevX !== undefined) ? e2.prevX : e2.x;
+      const y2_0 = (e2.prevY !== undefined) ? e2.prevY : e2.y;
+
+      const vx1 = Number.isFinite(e1.vx) ? e1.vx : 0;
+      const vy1 = Number.isFinite(e1.vy) ? e1.vy : 0;
+      const vx2 = Number.isFinite(e2.vx) ? e2.vx : 0;
+      const vy2 = Number.isFinite(e2.vy) ? e2.vy : 0;
+
+      // Arena bounds for top-left coordinates
+      const max1X = SCREEN_WIDTH - s1;
+      const max1Y = SCREEN_HEIGHT - s1;
+      const max2X = SCREEN_WIDTH - s2;
+      const max2Y = SCREEN_HEIGHT - s2;
+
+      // Check immediate initial overlap at t = 0
+      const c1x0 = x1_0 + r1;
+      const c1y0 = y1_0 + r1;
+      const c2x0 = x2_0 + r2;
+      const c2y0 = y2_0 + r2;
+      if (((c1x0 - c2x0) ** 2 + (c1y0 - c2y0) ** 2) <= R * R) {
+        return 0;
+      }
+
+      // Calculate independent boundary-clamp hit times in (0, dt)
+      const splitTimes = [0, dt];
+
+      const checkClampTime = (pos0, vel, minBound, maxBound) => {
+        if (vel > 0 && pos0 < maxBound) {
+          const t = (maxBound - pos0) / vel;
+          if (t > 0 && t < dt) splitTimes.push(t);
+        } else if (vel < 0 && pos0 > minBound) {
+          const t = (minBound - pos0) / vel;
+          if (t > 0 && t < dt) splitTimes.push(t);
+        }
+      };
+
+      checkClampTime(x1_0, vx1, 0, max1X);
+      checkClampTime(y1_0, vy1, 0, max1Y);
+      checkClampTime(x2_0, vx2, 0, max2X);
+      checkClampTime(y2_0, vy2, 0, max2Y);
+
+      // Sort and deduplicate split times
+      splitTimes.sort((a, b) => a - b);
+      const uniqueSplits = [];
+      for (let i = 0; i < splitTimes.length; i++) {
+        if (i === 0 || Math.abs(splitTimes[i] - splitTimes[i - 1]) > 1e-12) {
+          uniqueSplits.push(splitTimes[i]);
+        }
+      }
+
+      // Helper to evaluate clamped position & effective velocity at any time t
+      const getTrajectoryAt = (pos0, vel, minBound, maxBound, t) => {
+        let clampT = Infinity;
+        if (vel > 0 && pos0 < maxBound) clampT = (maxBound - pos0) / vel;
+        else if (vel < 0 && pos0 > minBound) clampT = (minBound - pos0) / vel;
+
+        if (t < clampT) {
+          return {
+            pos: pos0 + vel * t,
+            effVel: vel
+          };
+        } else {
+          const clamped = Math.max(minBound, Math.min(maxBound, pos0 + vel * clampT));
+          return {
+            pos: clamped,
+            effVel: 0
+          };
+        }
+      };
+
+      // Check each piecewise linear sub-segment
+      for (let i = 0; i < uniqueSplits.length - 1; i++) {
+        const tStart = uniqueSplits[i];
+        const tEnd = uniqueSplits[i + 1];
+        const subDt = tEnd - tStart;
+        if (subDt <= 0) continue;
+
+        // Position and effective velocity of entity 1 at tStart
+        const e1X = getTrajectoryAt(x1_0, vx1, 0, max1X, tStart);
+        const e1Y = getTrajectoryAt(y1_0, vy1, 0, max1Y, tStart);
+        // Position and effective velocity of entity 2 at tStart
+        const e2X = getTrajectoryAt(x2_0, vx2, 0, max2X, tStart);
+        const e2Y = getTrajectoryAt(y2_0, vy2, 0, max2Y, tStart);
+
+        // Centers at tStart
+        const c1x = e1X.pos + r1;
+        const c1y = e1Y.pos + r1;
+        const c2x = e2X.pos + r2;
+        const c2y = e2Y.pos + r2;
+
+        const deltaX0 = c1x - c2x;
+        const deltaY0 = c1y - c2y;
+        const distSq0 = deltaX0 * deltaX0 + deltaY0 * deltaY0;
+
+        // Overlap at start of segment
+        if (distSq0 <= R * R) {
+          return tStart;
+        }
+
+        // Relative velocity over [tStart, tEnd]
+        const vEff1x = e1X.effVel;
+        const vEff1y = e1Y.effVel;
+        const vEff2x = e2X.effVel;
+        const vEff2y = e2Y.effVel;
+
+        const deltaVx = vEff1x - vEff2x;
+        const deltaVy = vEff1y - vEff2y;
+
+        // Quadratic coefficients: A tau^2 + B tau + C = 0
+        const A = deltaVx * deltaVx + deltaVy * deltaVy;
+        if (A <= 0) {
+          // Relative velocity is 0, no collision in this segment
+          continue;
+        }
+
+        const B = 2 * (deltaX0 * deltaVx + deltaY0 * deltaVy);
+        const C = distSq0 - R * R; // C > 0 because distSq0 > R^2
+
+        // If B >= 0, entities are moving apart or stationary relative to each other
+        if (B >= 0) continue;
+
+        const disc = B * B - 4 * A * C;
+        if (disc >= 0) {
+          const tau = (-B - Math.sqrt(disc)) / (2 * A);
+          if (tau >= 0 && tau <= subDt) {
+            return tStart + tau;
+          }
+        }
+      }
+
+      // Check final discrete position overlap at t = dt
+      const final1x = ((e1.x !== undefined) ? e1.x : (x1_0 + vx1 * dt)) + r1;
+      const final1y = ((e1.y !== undefined) ? e1.y : (y1_0 + vy1 * dt)) + r1;
+      const final2x = ((e2.x !== undefined) ? e2.x : (x2_0 + vx2 * dt)) + r2;
+      const final2y = ((e2.y !== undefined) ? e2.y : (y2_0 + vy2 * dt)) + r2;
+      const finalDistSq = (final1x - final2x) ** 2 + (final1y - final2y) ** 2;
+      if (finalDistSq <= R * R) {
+        return dt;
+      }
+
+      return null;
+    }
 
     mpInfectEntity(targetType, targetId, sourceId, explicitEventId) {
       if (!this.isHost || !this.mpState || this.mpState.mode !== "INFECTION") return false;
@@ -6717,11 +7654,28 @@
       if (!this.isHost || !this.mpState || this.mpState.mode !== "INFECTION") return;
       const st = this.mpState;
 
+      // Terminal match outcomes are immutable
+      if (this.state === "MATCH_OVER" || st.status === "DEFEAT" || st.status === "VICTORY") {
+        return;
+      }
+
+      const livingActivePlayers = Array.from(st.players.values()).filter(p => p.isAlive && !p.isSpectator);
+      if (livingActivePlayers.length === 0) {
+        st.status = "DEFEAT";
+        this.state = "MATCH_OVER";
+        this._broadcastReliable({
+          type: "MP_MATCH_DEFEAT",
+          reason: "ALL_PLAYERS_ELIMINATED"
+        });
+        this.sounds?.playGameOver?.();
+        this.showAnnouncement("💀 TEAM WIPEOUT", "ALL PLAYERS ELIMINATED!");
+        return;
+      }
+
       // Classify living players into infected and normal
       const infectedPlayers = [];
       const normalPlayers = [];
-      for (const p of st.players.values()) {
-        if (!p.isAlive || p.isSpectator) continue;
+      for (const p of livingActivePlayers) {
         if (p.isInfected) infectedPlayers.push(p);
         else normalPlayers.push(p);
       }
@@ -6735,19 +7689,18 @@
         else normalEnemies.push(e);
       }
 
-      // ── Infection Spreading (Interactions 1-4) Active before Boss Branch ──
+      // ── Infection Spreading (Interactions 1-4 via Continuous Swept-Circle TOI) ──
       if (!st.bossBranch) {
+        const T_start = st.infectionTimer || 0;
+        const candidateEvents = [];
+
         // Interaction 1: Infected mini enemy touches normal mini enemy -> infect normal mini enemy
         for (const infE of infectedEnemies) {
           for (const normE of normalEnemies) {
             if (normE.isInfected) continue;
-            const ecx1 = infE.x + infE.size / 2;
-            const ecy1 = infE.y + infE.size / 2;
-            const ecx2 = normE.x + normE.size / 2;
-            const ecy2 = normE.y + normE.size / 2;
-            const dist = Math.hypot(ecx1 - ecx2, ecy1 - ecy2);
-            if (dist <= (infE.size / 2 + normE.size / 2)) {
-              this.mpInfectEntity("ENEMY", normE.id, infE.id);
+            const tau = this._computeSweptCircleTOI(infE, normE, dt);
+            if (tau !== null) {
+              candidateEvents.push({ tau, type: "ENEMY", targetId: normE.id, sourceId: infE.id, targetEntity: normE });
             }
           }
         }
@@ -6756,13 +7709,9 @@
         for (const infE of infectedEnemies) {
           for (const normP of normalPlayers) {
             if (normP.isInfected) continue;
-            const ecx = infE.x + infE.size / 2;
-            const ecy = infE.y + infE.size / 2;
-            const pcx = normP.x + PLAYER_SIZE / 2;
-            const pcy = normP.y + PLAYER_SIZE / 2;
-            const dist = Math.hypot(ecx - pcx, ecy - pcy);
-            if (dist <= (infE.size / 2 + PLAYER_SIZE / 2)) {
-              this.mpInfectEntity("PLAYER", normP.id, infE.id);
+            const tau = this._computeSweptCircleTOI(infE, normP, dt);
+            if (tau !== null) {
+              candidateEvents.push({ tau, type: "PLAYER", targetId: normP.id, sourceId: infE.id, targetEntity: normP });
             }
           }
         }
@@ -6771,13 +7720,9 @@
         for (const infP of infectedPlayers) {
           for (const normP of normalPlayers) {
             if (normP.isInfected) continue;
-            const pcx1 = infP.x + PLAYER_SIZE / 2;
-            const pcy1 = infP.y + PLAYER_SIZE / 2;
-            const pcx2 = normP.x + PLAYER_SIZE / 2;
-            const pcy2 = normP.y + PLAYER_SIZE / 2;
-            const dist = Math.hypot(pcx1 - pcx2, pcy1 - pcy2);
-            if (dist <= PLAYER_SIZE) {
-              this.mpInfectEntity("PLAYER", normP.id, infP.id);
+            const tau = this._computeSweptCircleTOI(infP, normP, dt);
+            if (tau !== null) {
+              candidateEvents.push({ tau, type: "PLAYER", targetId: normP.id, sourceId: infP.id, targetEntity: normP });
             }
           }
         }
@@ -6786,13 +7731,28 @@
         for (const infP of infectedPlayers) {
           for (const normE of normalEnemies) {
             if (normE.isInfected) continue;
-            const pcx = infP.x + PLAYER_SIZE / 2;
-            const pcy = infP.y + PLAYER_SIZE / 2;
-            const ecx = normE.x + normE.size / 2;
-            const ecy = normE.y + normE.size / 2;
-            const dist = Math.hypot(pcx - ecx, pcy - ecy);
-            if (dist <= (PLAYER_SIZE / 2 + normE.size / 2)) {
-              this.mpInfectEntity("ENEMY", normE.id, infP.id);
+            const tau = this._computeSweptCircleTOI(infP, normE, dt);
+            if (tau !== null) {
+              candidateEvents.push({ tau, type: "ENEMY", targetId: normE.id, sourceId: infP.id, targetEntity: normE });
+            }
+          }
+        }
+
+        // Sort candidate infection events chronologically by Time of Impact (TOI)
+        candidateEvents.sort((a, b) => a.tau - b.tau);
+
+        let aliveNormalCount = normalPlayers.length;
+        let lastPlayerInfectionTime = null;
+
+        for (const ev of candidateEvents) {
+          if (ev.targetEntity.isInfected) continue; // Already infected earlier in this frame
+          this.mpInfectEntity(ev.type, ev.targetId, ev.sourceId);
+
+          if (ev.type === "PLAYER") {
+            aliveNormalCount--;
+            if (aliveNormalCount === 0) {
+              lastPlayerInfectionTime = T_start + ev.tau;
+              break; // All active players are now infected!
             }
           }
         }
@@ -6801,7 +7761,7 @@
         if (st.weaponPickups && st.weaponPickups.length > 0) {
           const collectedIds = new Set();
           for (const p of st.players.values()) {
-            if (!p.isAlive || p.isSpectator || p.infectionWeapon) continue; // 1 weapon per player; no switching
+            if (!p.isAlive || p.isSpectator || p.infectionWeapon) continue;
             const pcx = p.x + PLAYER_SIZE / 2;
             const pcy = p.y + PLAYER_SIZE / 2;
 
@@ -6811,26 +7771,40 @@
               if (dist <= (PLAYER_SIZE / 2 + (pk.radius || INFECTION_CONFIG.weaponPickupRadius || 18))) {
                 collectedIds.add(pk.id);
                 this.mpCollectWeaponPickup(p.id, pk.id);
-                break; // Player collected one weapon, stop checking other pickups for this player
+                break;
               }
             }
           }
         }
 
-        // ── Milestone 6C: Check Branch Logic & Transitions (Host Authoritative) ──
-        st.infectionTimer = (st.infectionTimer || 0) + dt;
-        const livingActivePlayers = Array.from(st.players.values()).filter(p => p.isAlive && !p.isSpectator);
-        const aliveNormals = livingActivePlayers.filter(p => !p.isInfected);
-        const aliveInfected = livingActivePlayers.filter(p => p.isInfected);
-
-        // Branch 1: If >=1 normal player survives continuously for 60s -> Infected Boss
-        if (st.infectionTimer >= (INFECTION_CONFIG.branchSurvivalTime || 60.0) && aliveNormals.length > 0) {
-          this.mpTriggerBossBranch("INFECTED_BOSS");
-          return;
+        // ── Milestone 6C & 7: Check Branch Logic & Transitions (Host Authoritative) ──
+        if (aliveNormalCount === 0 && livingActivePlayers.length > 0) {
+          // All active players are infected
+          const tFinal = (lastPlayerInfectionTime !== null) ? lastPlayerInfectionTime : T_start;
+          st.infectionTimer = tFinal;
+          if (tFinal < (INFECTION_CONFIG.branchSurvivalTime || 60.0)) {
+            // Strictly before 60.000s -> Cosmic Boss!
+            this.mpTriggerBossBranch("COSMIC_BOSS");
+            return;
+          } else {
+            // Exactly or after 60.000s -> Team Defeat (Quarantine Breached)!
+            st.status = "DEFEAT";
+            this.state = "MATCH_OVER";
+            this._broadcastReliable({
+              type: "MP_MATCH_DEFEAT",
+              reason: "QUARANTINE_BREACHED"
+            });
+            this.sounds?.playGameOver?.();
+            this.showAnnouncement("☣️ QUARANTINE BREACHED", "INFECTION OVERWHELMED ARENA");
+            return;
+          }
         }
-        // Branch 2: If ALL active players become infected before 60s -> Cosmic Boss
-        else if (st.infectionTimer < (INFECTION_CONFIG.branchSurvivalTime || 60.0) && livingActivePlayers.length > 0 && livingActivePlayers.length === aliveInfected.length) {
-          this.mpTriggerBossBranch("COSMIC_BOSS");
+
+        // If >=1 normal active player survived
+        st.infectionTimer = T_start + dt;
+        if (st.infectionTimer >= (INFECTION_CONFIG.branchSurvivalTime || 60.0) && aliveNormalCount > 0) {
+          // Survived to or beyond 60.000s -> Infected Boss!
+          this.mpTriggerBossBranch("INFECTED_BOSS");
           return;
         }
       }
@@ -7528,6 +8502,8 @@
 
       // ── Finite State Machine for each Enemy ──
       for (const [eId, e] of this.mpState.enemies) {
+        e.prevX = e.x;
+        e.prevY = e.y;
         e.decisionTimer = (e.decisionTimer || 0) + dt;
         if (e.decisionTimer >= 0.5 || !e.targetId) {
           e.decisionTimer = 0;
@@ -7535,7 +8511,7 @@
         }
 
         let target = e.targetId ? this.mpState.players.get(e.targetId) : null;
-        if (!target || !target.isAlive || target.isSpectator) {
+        if (!target || !target.isAlive || target.isSpectator || target.disconnected) {
           e.targetId = null;
           this.mpSelectTarget(e);
           target = e.targetId ? this.mpState.players.get(e.targetId) : null;
@@ -8647,6 +9623,9 @@
                 }
               }
             }
+
+            // Milestone 7: Liveness & Heartbeat update (guest)
+            this.mpUpdateLiveness(dt);
           }
 
           // Update texts & particles
@@ -8678,7 +9657,9 @@
 
           // Simulate all 2-8 players
           for (const p of this.mpState.players.values()) {
-            if (!p.isAlive || p.isSpectator || (p.freezeTimer > 0)) {
+            p.prevX = p.x;
+            p.prevY = p.y;
+            if (!p.isAlive || p.isSpectator || (p.freezeTimer > 0) || p.disconnected) {
               p.vx = 0;
               p.vy = 0;
               continue;
@@ -8716,7 +9697,16 @@
           // Milestone 6A: Update Infection Mode propagation (host only)
           if (this.mpState.mode === "INFECTION") {
             this.mpUpdateInfection(dt);
+            for (const p of this.mpState.players.values()) {
+              delete p.prevX; delete p.prevY;
+            }
+            for (const e of this.mpState.enemies.values()) {
+              delete e.prevX; delete e.prevY;
+            }
           }
+
+          // Milestone 7: Liveness & Heartbeat update (host)
+          this.mpUpdateLiveness(dt);
 
           // Authoritative snapshot broadcast at 25Hz
           this.mpSnapshotTimer = (this.mpSnapshotTimer || 0) + dt;
