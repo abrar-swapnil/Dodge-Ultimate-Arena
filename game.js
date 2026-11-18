@@ -4450,6 +4450,95 @@
       this._setLobbyStatus(`<span class="lobby-spinner"></span> Waiting for players… Room: ${roomCode}`, "info");
     }
 
+    // ── GUEST: Setup Host DataConnections with Atomic Cleanup Safety ─
+    _setupGuestHostConnections(hostPeerId) {
+      if (!this.peer || this.isHost) {
+        throw new Error("Invalid peer state for guest connection setup.");
+      }
+      if (!hostPeerId || typeof hostPeerId !== "string" || !hostPeerId.trim() || hostPeerId !== this.hostPeerId) {
+        throw new Error("Invalid or untrusted hostPeerId for connection setup.");
+      }
+
+      let reliable = null;
+      let unreliable = null;
+      let relDataHandler = null;
+      let relCloseHandler = null;
+      let relErrorHandler = null;
+      let unrelDataHandler = null;
+      let unrelCloseHandler = null;
+
+      const cleanup = () => {
+        if (reliable) {
+          try { if (relDataHandler) reliable.off?.("data", relDataHandler); } catch (e) {}
+          try { reliable.off?.("data"); } catch (e) {}
+          try { if (relCloseHandler) reliable.off?.("close", relCloseHandler); } catch (e) {}
+          try { reliable.off?.("close"); } catch (e) {}
+          try { if (relErrorHandler) reliable.off?.("error", relErrorHandler); } catch (e) {}
+          try { reliable.off?.("error"); } catch (e) {}
+          try { reliable.close?.(); } catch (e) {}
+          reliable = null;
+        }
+        if (unreliable) {
+          try { if (unrelDataHandler) unreliable.off?.("data", unrelDataHandler); } catch (e) {}
+          try { unreliable.off?.("data"); } catch (e) {}
+          try { if (unrelCloseHandler) unreliable.off?.("close", unrelCloseHandler); } catch (e) {}
+          try { unreliable.off?.("close"); } catch (e) {}
+          try { unreliable.close?.(); } catch (e) {}
+          unreliable = null;
+        }
+        if (this.mpConnections) {
+          this.mpConnections.delete(hostPeerId);
+        }
+      };
+
+      try {
+        reliable = this.peer.connect(hostPeerId, { reliable: true, label: "cmd" });
+        if (!reliable || !reliable.peer || typeof reliable.peer !== "string" || reliable.peer !== this.hostPeerId) {
+          throw new Error("Reliable connection peer identity mismatch with trusted host.");
+        }
+
+        unreliable = this.peer.connect(hostPeerId, { reliable: false, maxRetransmits: 0, ordered: false, label: "sync" });
+        if (!unreliable || !unreliable.peer || typeof unreliable.peer !== "string" || unreliable.peer !== this.hostPeerId) {
+          throw new Error("Unreliable connection peer identity mismatch with trusted host.");
+        }
+
+        relDataHandler = (msg) => {
+          if (!reliable) return;
+          const senderPeer = reliable.peer;
+          if (senderPeer && typeof senderPeer === "string" && senderPeer.trim() && senderPeer === this.hostPeerId) {
+            this._handleLobbyMessage(msg, senderPeer);
+          } else {
+            console.warn(`[MP] Dropped reliable message from invalid or untrusted transport peer identity: '${senderPeer}'`);
+          }
+        };
+        relCloseHandler = () => this._handlePeerDisconnect(hostPeerId);
+        relErrorHandler = () => this._handlePeerDisconnect(hostPeerId);
+
+        reliable.on("data", relDataHandler);
+        reliable.on("close", relCloseHandler);
+        reliable.on("error", relErrorHandler);
+
+        unrelDataHandler = (msg) => {
+          if (!unreliable) return;
+          const senderPeer = unreliable.peer;
+          if (senderPeer && typeof senderPeer === "string" && senderPeer.trim() && senderPeer === this.hostPeerId) {
+            this._handleLobbyMessage(msg, senderPeer);
+          } else {
+            console.warn(`[MP] Dropped unreliable message from invalid or untrusted transport peer identity: '${senderPeer}'`);
+          }
+        };
+        unrelCloseHandler = () => this._handlePeerDisconnect(hostPeerId);
+
+        unreliable.on("data", unrelDataHandler);
+        unreliable.on("close", unrelCloseHandler);
+
+        return { reliable, unreliable, cleanup };
+      } catch (err) {
+        cleanup();
+        throw err;
+      }
+    }
+
     // ── GUEST: Join Room ───────────────────────────────────────────
     async lobbyJoin(roomCode) {
       const joinBtn = document.getElementById("btn-join-room");
@@ -4487,49 +4576,27 @@
           try { incomingConn.close(); } catch (e) {}
         });
 
-        // Reliable channel (critical events)
-        const reliable = this.peer.connect(hostPeerId, { reliable: true, label: "cmd" });
-        // Unreliable channel (movement snapshots — future use)
-        const unreliable = this.peer.connect(hostPeerId, { reliable: false, maxRetransmits: 0, ordered: false, label: "sync" });
+        // Setup guest connections to host with atomic cleanup safety
+        let guestConns = null;
+        try {
+          guestConns = this._setupGuestHostConnections(hostPeerId);
+          const { reliable, unreliable } = guestConns;
 
-        // Immediate connection identity verification
-        if (!reliable || !reliable.peer || typeof reliable.peer !== "string" || reliable.peer !== this.hostPeerId) {
-          try { reliable?.close?.(); } catch (e) {}
-          throw new Error("Reliable connection peer identity mismatch with trusted host.");
-        }
-        if (!unreliable || !unreliable.peer || typeof unreliable.peer !== "string" || unreliable.peer !== this.hostPeerId) {
-          try { unreliable?.close?.(); } catch (e) {}
-          throw new Error("Unreliable connection peer identity mismatch with trusted host.");
-        }
+          await new Promise((resolve, reject) => {
+            reliable.on("open", resolve);
+            reliable.on("error", reject);
+            setTimeout(reject, 10000);
+          });
 
-        // Listen for host messages on both channels deriving sender identity exclusively from transport .peer
-        reliable.on("data", (msg) => {
-          const senderPeer = reliable.peer;
-          if (senderPeer && typeof senderPeer === "string" && senderPeer.trim() && senderPeer === this.hostPeerId) {
-            this._handleLobbyMessage(msg, senderPeer);
-          } else {
-            console.warn(`[MP] Dropped reliable message from invalid or untrusted transport peer identity: '${senderPeer}'`);
+          this.mpConnections.set(hostPeerId, { reliable, unreliable });
+        } catch (connErr) {
+          if (guestConns?.cleanup) {
+            guestConns.cleanup();
           }
-        });
-        reliable.on("close", () => this._handlePeerDisconnect(hostPeerId));
-        reliable.on("error", () => this._handlePeerDisconnect(hostPeerId));
-        unreliable.on("data", (msg) => {
-          const senderPeer = unreliable.peer;
-          if (senderPeer && typeof senderPeer === "string" && senderPeer.trim() && senderPeer === this.hostPeerId) {
-            this._handleLobbyMessage(msg, senderPeer);
-          } else {
-            console.warn(`[MP] Dropped unreliable message from invalid or untrusted transport peer identity: '${senderPeer}'`);
-          }
-        });
-        unreliable.on("close", () => this._handlePeerDisconnect(hostPeerId));
+          throw connErr;
+        }
 
-        await new Promise((resolve, reject) => {
-          reliable.on("open", resolve);
-          reliable.on("error", reject);
-          setTimeout(reject, 10000);
-        });
-
-        this.mpConnections.set(hostPeerId, { reliable, unreliable });
+        const { reliable } = guestConns;
 
         // 3. Register join on server
         const joinRes = await fetch(`${this._serverBase()}/api/rooms/join`, {

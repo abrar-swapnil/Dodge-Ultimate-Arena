@@ -558,6 +558,146 @@ unreliableDispatched = false;
 unreliableCallback({ peer: "trusted-host-001" }, { type: "MP_SNAPSHOT" });
 assert(unreliableDispatched === true, "D.6d: Unreliable channel accepted packet strictly when connection.peer matches trusted hostPeerId");
 
+// ── Milestone 6D-C.3: Cleanup-Safe Connection Creation & Lifecycle ───
+function createMockConnection(peerId) {
+  let closed = false;
+  const listeners = new Map();
+  return {
+    peer: peerId,
+    get closed() { return closed; },
+    listeners,
+    on(event, fn) {
+      if (!listeners.has(event)) listeners.set(event, []);
+      listeners.get(event).push(fn);
+    },
+    off(event, fn) {
+      if (!fn) {
+        listeners.delete(event);
+      } else if (listeners.has(event)) {
+        const arr = listeners.get(event).filter(cb => cb !== fn);
+        listeners.set(event, arr);
+      }
+    },
+    close() {
+      closed = true;
+    },
+    emit(event, data) {
+      const cbs = listeners.get(event) || [];
+      cbs.forEach(cb => cb(data));
+    }
+  };
+}
+
+// D.7a Reliable connection valid, unreliable connection invalid
+const guestCleanupA = createGameInstance();
+guestCleanupA.isHost = false;
+guestCleanupA.hostPeerId = "trusted-host-001";
+const mockRelA = createMockConnection("trusted-host-001");
+const mockUnrelA = createMockConnection("rogue-host-999");
+guestCleanupA.peer = {
+  connect(peerId, opts) {
+    if (opts?.reliable) return mockRelA;
+    return mockUnrelA;
+  }
+};
+let errA = null;
+try {
+  guestCleanupA._setupGuestHostConnections("trusted-host-001");
+} catch (e) {
+  errA = e;
+}
+assert(errA !== null && mockRelA.closed === true && mockUnrelA.closed === true && !guestCleanupA.mpConnections.has("trusted-host-001"),
+  "D.7a: Reliable valid, unreliable invalid -> throws, closes reliable & unreliable, 0 leaked connections");
+
+// D.7b Reliable connection created, unreliable connection creation throws
+const guestCleanupB = createGameInstance();
+guestCleanupB.isHost = false;
+guestCleanupB.hostPeerId = "trusted-host-001";
+const mockRelB = createMockConnection("trusted-host-001");
+guestCleanupB.peer = {
+  connect(peerId, opts) {
+    if (opts?.reliable) return mockRelB;
+    throw new Error("WebRTC transport connection threw");
+  }
+};
+let errB = null;
+try {
+  guestCleanupB._setupGuestHostConnections("trusted-host-001");
+} catch (e) {
+  errB = e;
+}
+assert(errB !== null && mockRelB.closed === true && !guestCleanupB.mpConnections.has("trusted-host-001"),
+  "D.7b: Reliable created, unreliable creation throws -> throws, closes reliable, 0 leaked connections");
+
+// D.7c Both connections invalid
+const guestCleanupC = createGameInstance();
+guestCleanupC.isHost = false;
+guestCleanupC.hostPeerId = "trusted-host-001";
+const mockRelC = createMockConnection("rogue-host-999");
+const mockUnrelC = createMockConnection("rogue-host-999");
+guestCleanupC.peer = {
+  connect(peerId, opts) {
+    if (opts?.reliable) return mockRelC;
+    return mockUnrelC;
+  }
+};
+let errC = null;
+try {
+  guestCleanupC._setupGuestHostConnections("trusted-host-001");
+} catch (e) {
+  errC = e;
+}
+assert(errC !== null && mockRelC.closed === true && !guestCleanupC.mpConnections.has("trusted-host-001"),
+  "D.7c: Both connections invalid -> throws, closes created connection, 0 leaked connections");
+
+// D.7d Both connections valid
+const guestCleanupD = createGameInstance();
+guestCleanupD.isHost = false;
+guestCleanupD.hostPeerId = "trusted-host-001";
+const mockRelD = createMockConnection("trusted-host-001");
+const mockUnrelD = createMockConnection("trusted-host-001");
+guestCleanupD.peer = {
+  connect(peerId, opts) {
+    if (opts?.reliable) return mockRelD;
+    return mockUnrelD;
+  }
+};
+let connsD = null;
+try {
+  connsD = guestCleanupD._setupGuestHostConnections("trusted-host-001");
+} catch (e) {
+  connsD = null;
+}
+assert(connsD !== null && connsD.reliable === mockRelD && connsD.unreliable === mockUnrelD &&
+  mockRelD.closed === false && mockUnrelD.closed === false,
+  "D.7d: Both connections valid -> returns connections successfully, neither closed");
+
+// D.7e No leaked connection or registered active listener after failure
+const guestCleanupE = createGameInstance();
+guestCleanupE.isHost = false;
+guestCleanupE.hostPeerId = "trusted-host-001";
+let messagesReceivedE = 0;
+guestCleanupE._handleLobbyMessage = () => { messagesReceivedE++; };
+
+const mockRelE = createMockConnection("trusted-host-001");
+const mockUnrelE = createMockConnection("untrusted-host-xyz");
+guestCleanupE.peer = {
+  connect(peerId, opts) {
+    if (opts?.reliable) return mockRelE;
+    return mockUnrelE;
+  }
+};
+try {
+  guestCleanupE._setupGuestHostConnections("trusted-host-001");
+} catch (e) {}
+
+mockRelE.emit("data", { type: "MP_SNAPSHOT" });
+mockUnrelE.emit("data", { type: "MP_SNAPSHOT" });
+
+assert(mockRelE.closed === true && mockUnrelE.closed === true && messagesReceivedE === 0 &&
+  !guestCleanupE.mpConnections.has("trusted-host-001"),
+  "D.7e: No leaked connection or active listener executed after failure");
+
 // ─────────────────────────────────────────────────────────────────
 // SECTION 4: Spoofed Sender Identity Rejection (Host-Side)
 // ─────────────────────────────────────────────────────────────────

@@ -414,6 +414,7 @@ console.log("\n── Suite 6: Pickup Spawning (Provisional rates) ────�
 {
   const g = makeHostGame();
   g.initMPMatch("ELITE");
+  g.mpState.players.clear();
   g.mpState.pickups = [];
   g.mpState.elitePickupTimer = 0;
   g.mpState.eliteHeartTimer = 0;
