@@ -698,6 +698,66 @@ assert(mockRelE.closed === true && mockUnrelE.closed === true && messagesReceive
   !guestCleanupE.mpConnections.has("trusted-host-001"),
   "D.7e: No leaked connection or active listener executed after failure");
 
+// D.7f Handler-specific removal preserves foreign listeners
+const guestCleanupF = createGameInstance();
+guestCleanupF.isHost = false;
+guestCleanupF.hostPeerId = "trusted-host-001";
+const mockRelF = createMockConnection("trusted-host-001");
+let foreignListenerCalled = false;
+const foreignHandler = () => { foreignListenerCalled = true; };
+mockRelF.on("data", foreignHandler);
+const mockUnrelF = createMockConnection("rogue-host");
+guestCleanupF.peer = {
+  connect(peerId, opts) {
+    if (opts?.reliable) return mockRelF;
+    return mockUnrelF;
+  }
+};
+try {
+  guestCleanupF._setupGuestHostConnections("trusted-host-001");
+} catch (e) {}
+assert(mockRelF.listeners.get("data")?.includes(foreignHandler) === true,
+  "D.7f: off(event, handler) removed only owned handler, preserving foreign listeners");
+
+// D.7g mpConnections.delete cannot remove another session's connection entry
+const guestCleanupG = createGameInstance();
+guestCleanupG.isHost = false;
+guestCleanupG.hostPeerId = "trusted-host-001";
+const otherSessionReliable = createMockConnection("trusted-host-001");
+guestCleanupG.mpConnections.set("trusted-host-001", { reliable: otherSessionReliable, unreliable: null });
+
+const mockRelG = createMockConnection("trusted-host-001");
+const mockUnrelG = createMockConnection("rogue-host");
+guestCleanupG.peer = {
+  connect(peerId, opts) {
+    if (opts?.reliable) return mockRelG;
+    return mockUnrelG;
+  }
+};
+try {
+  guestCleanupG._setupGuestHostConnections("trusted-host-001");
+} catch (e) {}
+assert(guestCleanupG.mpConnections.get("trusted-host-001")?.reliable === otherSessionReliable,
+  "D.7g: mpConnections.delete did not remove another valid session's entry");
+
+// D.7h Cleanup is idempotent
+const guestCleanupH = createGameInstance();
+guestCleanupH.isHost = false;
+guestCleanupH.hostPeerId = "trusted-host-001";
+const mockRelH = createMockConnection("trusted-host-001");
+const mockUnrelH = createMockConnection("trusted-host-001");
+guestCleanupH.peer = {
+  connect(peerId, opts) {
+    if (opts?.reliable) return mockRelH;
+    return mockUnrelH;
+  }
+};
+const connsH = guestCleanupH._setupGuestHostConnections("trusted-host-001");
+connsH.cleanup();
+connsH.cleanup(); // idempotent second call
+assert(mockRelH.closed === true && mockUnrelH.closed === true,
+  "D.7h: Cleanup is idempotent and safely callable multiple times");
+
 // ─────────────────────────────────────────────────────────────────
 // SECTION 4: Spoofed Sender Identity Rejection (Host-Side)
 // ─────────────────────────────────────────────────────────────────

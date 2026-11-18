@@ -4466,28 +4466,33 @@
       let relErrorHandler = null;
       let unrelDataHandler = null;
       let unrelCloseHandler = null;
+      let isCleanedUp = false;
 
       const cleanup = () => {
-        if (reliable) {
-          try { if (relDataHandler) reliable.off?.("data", relDataHandler); } catch (e) {}
-          try { reliable.off?.("data"); } catch (e) {}
-          try { if (relCloseHandler) reliable.off?.("close", relCloseHandler); } catch (e) {}
-          try { reliable.off?.("close"); } catch (e) {}
-          try { if (relErrorHandler) reliable.off?.("error", relErrorHandler); } catch (e) {}
-          try { reliable.off?.("error"); } catch (e) {}
-          try { reliable.close?.(); } catch (e) {}
-          reliable = null;
+        if (isCleanedUp) return;
+        isCleanedUp = true;
+
+        const relToClose = reliable;
+        const unrelToClose = unreliable;
+        reliable = null;
+        unreliable = null;
+
+        if (relToClose) {
+          try { if (relDataHandler) relToClose.off?.("data", relDataHandler); } catch (e) {}
+          try { if (relCloseHandler) relToClose.off?.("close", relCloseHandler); } catch (e) {}
+          try { if (relErrorHandler) relToClose.off?.("error", relErrorHandler); } catch (e) {}
+          try { relToClose.close?.(); } catch (e) {}
         }
-        if (unreliable) {
-          try { if (unrelDataHandler) unreliable.off?.("data", unrelDataHandler); } catch (e) {}
-          try { unreliable.off?.("data"); } catch (e) {}
-          try { if (unrelCloseHandler) unreliable.off?.("close", unrelCloseHandler); } catch (e) {}
-          try { unreliable.off?.("close"); } catch (e) {}
-          try { unreliable.close?.(); } catch (e) {}
-          unreliable = null;
+        if (unrelToClose) {
+          try { if (unrelDataHandler) unrelToClose.off?.("data", unrelDataHandler); } catch (e) {}
+          try { if (unrelCloseHandler) unrelToClose.off?.("close", unrelCloseHandler); } catch (e) {}
+          try { unrelToClose.close?.(); } catch (e) {}
         }
         if (this.mpConnections) {
-          this.mpConnections.delete(hostPeerId);
+          const existing = this.mpConnections.get(hostPeerId);
+          if (existing && (existing.reliable === relToClose || existing.unreliable === unrelToClose)) {
+            this.mpConnections.delete(hostPeerId);
+          }
         }
       };
 
@@ -4503,7 +4508,7 @@
         }
 
         relDataHandler = (msg) => {
-          if (!reliable) return;
+          if (isCleanedUp || !reliable) return;
           const senderPeer = reliable.peer;
           if (senderPeer && typeof senderPeer === "string" && senderPeer.trim() && senderPeer === this.hostPeerId) {
             this._handleLobbyMessage(msg, senderPeer);
@@ -4511,15 +4516,21 @@
             console.warn(`[MP] Dropped reliable message from invalid or untrusted transport peer identity: '${senderPeer}'`);
           }
         };
-        relCloseHandler = () => this._handlePeerDisconnect(hostPeerId);
-        relErrorHandler = () => this._handlePeerDisconnect(hostPeerId);
+        relCloseHandler = () => {
+          if (isCleanedUp) return;
+          this._handlePeerDisconnect(hostPeerId);
+        };
+        relErrorHandler = () => {
+          if (isCleanedUp) return;
+          this._handlePeerDisconnect(hostPeerId);
+        };
 
         reliable.on("data", relDataHandler);
         reliable.on("close", relCloseHandler);
         reliable.on("error", relErrorHandler);
 
         unrelDataHandler = (msg) => {
-          if (!unreliable) return;
+          if (isCleanedUp || !unreliable) return;
           const senderPeer = unreliable.peer;
           if (senderPeer && typeof senderPeer === "string" && senderPeer.trim() && senderPeer === this.hostPeerId) {
             this._handleLobbyMessage(msg, senderPeer);
@@ -4527,7 +4538,10 @@
             console.warn(`[MP] Dropped unreliable message from invalid or untrusted transport peer identity: '${senderPeer}'`);
           }
         };
-        unrelCloseHandler = () => this._handlePeerDisconnect(hostPeerId);
+        unrelCloseHandler = () => {
+          if (isCleanedUp) return;
+          this._handlePeerDisconnect(hostPeerId);
+        };
 
         unreliable.on("data", unrelDataHandler);
         unreliable.on("close", unrelCloseHandler);
@@ -4583,9 +4597,37 @@
           const { reliable, unreliable } = guestConns;
 
           await new Promise((resolve, reject) => {
-            reliable.on("open", resolve);
-            reliable.on("error", reject);
-            setTimeout(reject, 10000);
+            let settled = false;
+            let timer = null;
+
+            const onOpen = () => {
+              if (settled) return;
+              settled = true;
+              clearTimeout(timer);
+              try { reliable.off?.("open", onOpen); } catch (e) {}
+              try { reliable.off?.("error", onError); } catch (e) {}
+              resolve();
+            };
+
+            const onError = (err) => {
+              if (settled) return;
+              settled = true;
+              clearTimeout(timer);
+              try { reliable.off?.("open", onOpen); } catch (e) {}
+              try { reliable.off?.("error", onError); } catch (e) {}
+              reject(err || new Error("Reliable connection error during open handshake."));
+            };
+
+            timer = setTimeout(() => {
+              if (settled) return;
+              settled = true;
+              try { reliable.off?.("open", onOpen); } catch (e) {}
+              try { reliable.off?.("error", onError); } catch (e) {}
+              reject(new Error("Connection to host timed out."));
+            }, 10000);
+
+            reliable.on("open", onOpen);
+            reliable.on("error", onError);
           });
 
           this.mpConnections.set(hostPeerId, { reliable, unreliable });
